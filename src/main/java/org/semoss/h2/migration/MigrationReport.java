@@ -1,5 +1,8 @@
 package org.semoss.h2.migration;
 
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+
 import java.io.IOException;
 import java.io.Writer;
 import java.nio.file.Files;
@@ -8,13 +11,17 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Collects per-database migration results and writes a JSON summary report.
- * No external JSON library — hand-produces a simple, valid JSON structure.
+ * {@link #toMap()} returns the structured report; {@link #toJson()} serialises it via Gson.
  */
 public final class MigrationReport {
+
+    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
     public enum Status { SUCCESS, FAILED, SKIPPED }
 
@@ -51,6 +58,45 @@ public final class MigrationReport {
     public long skippedCount() { return results.stream().filter(r -> r.status == Status.SKIPPED).count(); }
 
     /**
+     * Return the report as a structured Map (suitable for further processing).
+     */
+    public Map<String, Object> toMap() {
+        if (endTime == null) finish();
+        long totalDuration = Duration.between(startTime, endTime).toMillis();
+
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("total", totalCount());
+        summary.put("success", successCount());
+        summary.put("failed", failedCount());
+        summary.put("skipped", skippedCount());
+        summary.put("durationMs", totalDuration);
+        summary.put("startTime", startTime.toString());
+        summary.put("endTime", endTime.toString());
+
+        List<Map<String, Object>> databases = new ArrayList<>();
+        for (DatabaseResult r : results) {
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("path", r.path);
+            entry.put("status", r.status.name());
+            entry.put("reason", r.reason);
+            entry.put("durationMs", r.durationMs);
+            databases.add(entry);
+        }
+
+        Map<String, Object> report = new LinkedHashMap<>();
+        report.put("summary", summary);
+        report.put("databases", databases);
+        return report;
+    }
+
+    /**
+     * Produce a pretty-printed JSON string of the report.
+     */
+    public String toJson() {
+        return GSON.toJson(toMap());
+    }
+
+    /**
      * Write the report as JSON to the given file.
      */
     public void writeJson(Path outputFile) throws IOException {
@@ -59,51 +105,5 @@ public final class MigrationReport {
         try (Writer w = Files.newBufferedWriter(outputFile)) {
             w.write(toJson());
         }
-    }
-
-    /**
-     * Produce a JSON string of the report.
-     */
-    public String toJson() {
-        if (endTime == null) finish();
-        long totalDuration = Duration.between(startTime, endTime).toMillis();
-
-        StringBuilder sb = new StringBuilder();
-        sb.append("{\n");
-        sb.append("  \"summary\": {\n");
-        sb.append("    \"total\": ").append(totalCount()).append(",\n");
-        sb.append("    \"success\": ").append(successCount()).append(",\n");
-        sb.append("    \"failed\": ").append(failedCount()).append(",\n");
-        sb.append("    \"skipped\": ").append(skippedCount()).append(",\n");
-        sb.append("    \"durationMs\": ").append(totalDuration).append(",\n");
-        sb.append("    \"startTime\": \"").append(startTime).append("\",\n");
-        sb.append("    \"endTime\": \"").append(endTime).append("\"\n");
-        sb.append("  },\n");
-        sb.append("  \"databases\": [\n");
-        for (int i = 0; i < results.size(); i++) {
-            DatabaseResult r = results.get(i);
-            sb.append("    {\n");
-            sb.append("      \"path\": ").append(jsonString(r.path)).append(",\n");
-            sb.append("      \"status\": \"").append(r.status).append("\",\n");
-            sb.append("      \"reason\": ").append(jsonString(r.reason)).append(",\n");
-            sb.append("      \"durationMs\": ").append(r.durationMs).append("\n");
-            sb.append("    }");
-            if (i < results.size() - 1) sb.append(",");
-            sb.append("\n");
-        }
-        sb.append("  ]\n");
-        sb.append("}");
-        return sb.toString();
-    }
-
-    private static String jsonString(String value) {
-        if (value == null) return "null";
-        return "\"" + value
-                .replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t")
-                + "\"";
     }
 }

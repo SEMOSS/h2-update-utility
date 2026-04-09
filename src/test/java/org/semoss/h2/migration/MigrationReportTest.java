@@ -1,13 +1,18 @@
 package org.semoss.h2.migration;
 
+import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -103,5 +108,43 @@ class MigrationReportTest {
         // Don't call finish()
         String json = report.toJson();
         assertTrue(json.contains("\"endTime\""));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void toMap_returnsStructuredData() {
+        MigrationReport report = new MigrationReport();
+        report.addResult("/db/x.mv.db", MigrationReport.Status.SUCCESS, "ok", 300);
+        report.addResult("/db/y.mv.db", MigrationReport.Status.FAILED, "timeout", 50);
+        report.finish();
+
+        Map<String, Object> map = report.toMap();
+
+        assertNotNull(map.get("summary"));
+        assertNotNull(map.get("databases"));
+
+        Map<String, Object> summary = (Map<String, Object>) map.get("summary");
+        assertEquals(2L, summary.get("total"));
+        assertEquals(1L, summary.get("success"));
+        assertEquals(1L, summary.get("failed"));
+
+        List<Map<String, Object>> databases = (List<Map<String, Object>>) map.get("databases");
+        assertEquals(2, databases.size());
+        assertEquals("/db/x.mv.db", databases.get(0).get("path"));
+        assertEquals("FAILED", databases.get(1).get("status"));
+    }
+
+    @Test
+    void toJson_roundTripsViaGson() {
+        MigrationReport report = new MigrationReport();
+        report.addResult("/db/a.mv.db", MigrationReport.Status.SUCCESS, "migrated", 200);
+        report.finish();
+
+        String json = report.toJson();
+        Map<String, Object> parsed = new Gson().fromJson(json,
+                new TypeToken<Map<String, Object>>() {}.getType());
+
+        assertNotNull(parsed.get("summary"));
+        assertNotNull(parsed.get("databases"));
     }
 }

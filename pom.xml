@@ -21,6 +21,7 @@
         <h2.old.version>1.4.200</h2.old.version>
         <h2.new.version>2.4.240</h2.new.version>
         <junit.version>5.11.4</junit.version>
+        <gson.version>2.11.0</gson.version>
     </properties>
 
     <dependencies>
@@ -29,6 +30,13 @@
             They are copied into resources/lib/ at build time and loaded
             via isolated URLClassLoaders at runtime to avoid version conflicts.
         -->
+
+        <!-- Gson for JSON serialization -->
+        <dependency>
+            <groupId>com.google.code.gson</groupId>
+            <artifactId>gson</artifactId>
+            <version>${gson.version}</version>
+        </dependency>
 
         <!-- JUnit 5 for testing -->
         <dependency>
