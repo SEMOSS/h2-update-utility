@@ -95,18 +95,20 @@ All CLI flags can be set via environment variables (matching Semoss conventions)
 ## Docker
 
 ```bash
-# Build
-docker build -t h2-migration-service .
+# Build locally
+docker build -t h2-migration-service:1.0.0 .
+
+# TODO: instructions to pull from Docker Hub
 
 # Run local mode
 docker run -v /path/to/db:/data -v /path/to/backups:/backup \
-  h2-migration-service --mode=local --db-dir=/data --backup-dir=/backup
+  h2-migration-service:1.0.0 --mode=local --db-dir=/data --backup-dir=/backup
 
 # Run cloud mode
 docker run -e SEMOSS_STORAGE_PROVIDER=s3 \
   -e S3_REGION=us-east-1 -e S3_BUCKET=mybucket \
   -e S3_ACCESS_KEY=AKID -e S3_SECRET_KEY=SECRET \
-  h2-migration-service --mode=cloud --backup-dir=/backup
+  h2-migration-service:1.0.0 --mode=cloud --backup-dir=/backup
 ```
 
 ## Architecture
