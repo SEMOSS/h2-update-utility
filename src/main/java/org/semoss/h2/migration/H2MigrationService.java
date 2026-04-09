@@ -1,11 +1,13 @@
 package org.semoss.h2.migration;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.SQLException;
 import java.util.List;
 import java.util.logging.Level;
+import java.util.logging.LogManager;
 import java.util.logging.Logger;
 
 public class H2MigrationService {
@@ -22,7 +24,20 @@ public class H2MigrationService {
         this.report = new MigrationReport();
     }
 
+    private static void configureLogging() {
+        try (InputStream is = H2MigrationService.class.getClassLoader()
+                .getResourceAsStream("logging.properties")) {
+            if (is != null) {
+                LogManager.getLogManager().readConfiguration(is);
+            }
+        } catch (IOException ignored) {
+            // fall back to JVM defaults
+        }
+    }
+
     public static void main(String[] args) {
+        configureLogging();
+
         if (args.length == 0 || "--help".equals(args[0])) {
             System.out.println(MigrationConfig.usage());
             System.exit(args.length == 0 ? 1 : 0);
