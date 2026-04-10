@@ -1,5 +1,5 @@
 # Build stage
-FROM eclipse-temurin:21-jdk AS build
+FROM azul/zulu-openjdk:21-latest AS build
 WORKDIR /build
 COPY pom.xml .
 COPY src ./src
@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y maven && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Runtime stage
-FROM eclipse-temurin:21-jre
+FROM azul/zulu-openjdk:21-latest
 LABEL maintainer="semoss"
 LABEL description="H2 Database Migration Service (1.4.x → 2.x)"
 
