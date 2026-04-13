@@ -24,6 +24,7 @@ class RCloneClientTest {
                 "", "", "", false, false,
                 "", "", "",
                 "", "", "", "",
+                "",
                 "rclone", ""
         );
 
@@ -42,6 +43,7 @@ class RCloneClientTest {
                 "myaccount", "mykey", "", false, false,
                 "", "", "",
                 "", "", "", "",
+                "",
                 "rclone", ""
         );
 
@@ -60,6 +62,7 @@ class RCloneClientTest {
                 "", "", "", false, false,
                 "/path/to/sa.json", "gcsbucket", "us-central1",
                 "", "", "", "",
+                "",
                 "rclone", ""
         );
 
@@ -78,6 +81,7 @@ class RCloneClientTest {
                 "", "", "", false, false,
                 "", "", "",
                 "http://localhost:9000", "us-east-1", "minio-key", "minio-secret",
+                "minio-bucket",
                 "rclone", ""
         );
 
@@ -96,6 +100,7 @@ class RCloneClientTest {
                 "", "", "", false, false,
                 "", "", "",
                 "", "", "", "",
+                "",
                 "rclone", ""
         );
 
@@ -114,6 +119,7 @@ class RCloneClientTest {
                 "", "", "", false, false,
                 "", "", "",
                 "", "", "", "",
+                "",
                 "rclone", ""
         );
 

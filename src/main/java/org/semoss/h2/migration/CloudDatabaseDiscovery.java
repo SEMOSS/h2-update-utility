@@ -54,8 +54,7 @@ public final class CloudDatabaseDiscovery {
     }
 
     /**
-     * Download a remote database file along with its companion SMSS file
-     * to the local staging directory.
+     * Download only the remote database file to the local staging directory.
      *
      * @param remotePath base path (bucket/container)
      * @param relativeDbPath relative path of the .mv.db file
@@ -68,9 +67,6 @@ public final class CloudDatabaseDiscovery {
 
         String fullRemote = remotePath + "/" + relativeDbPath;
         rclone.download(fullRemote, localFile);
-
-        // Also try to download companion SMSS file
-        downloadCompanionSmss(remotePath, relativeDbPath);
 
         return localFile;
     }
@@ -89,10 +85,13 @@ public final class CloudDatabaseDiscovery {
     }
 
     /**
-     * Try to download the companion SMSS file for credential reading.
-     * SMSS files live in a sibling directory: {engineId}-smss/ or same dir.
+     * Download the companion SMSS file for credential reading.
+     * Call this only when migration is actually needed.
+     *
+     * @param remotePath base path (bucket/container)
+     * @param relativeDbPath relative path of the .mv.db file
      */
-    private void downloadCompanionSmss(String remotePath, String relativeDbPath)
+    public void downloadCompanionSmss(String remotePath, String relativeDbPath)
             throws IOException, InterruptedException {
         // Try to find smss in same directory
         String dir = relativeDbPath.contains("/")

@@ -95,24 +95,6 @@ class MigrationConfigTest {
     }
 
     @Test
-    void fromArgs_bothMode_requiresDbDirAndProvider() {
-        String[] args = {
-                "--mode=both",
-                "--db-dir=" + tempDir,
-                "--semoss-storage-provider=azure",
-                "--az-account-name=acct",
-                "--az-primary-key=key123"
-        };
-        MigrationConfig config = MigrationConfig.fromArgs(args);
-
-        assertEquals(MigrationConfig.MigrationMode.BOTH, config.mode());
-        assertNotNull(config.dbDir());
-        assertEquals("azure", config.storageProvider());
-        assertEquals("acct", config.azAccountName());
-        assertEquals("key123", config.azPrimaryKey());
-    }
-
-    @Test
     void fromArgs_modeCaseInsensitive() {
         String[] args = {"--mode=LOCAL", "--db-dir=" + tempDir};
         MigrationConfig config = MigrationConfig.fromArgs(args);

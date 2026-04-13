@@ -17,7 +17,7 @@ public record MigrationConfig(
         boolean autoCleanup,
         String defaultUsername,
         String defaultPassword,
-        // Cloud storage fields (used in cloud/both modes)
+        // Cloud storage fields (used in cloud mode)
         String storageProvider,
         String s3Region,
         String s3Bucket,
@@ -35,12 +35,13 @@ public record MigrationConfig(
         String minioRegion,
         String minioAccessKey,
         String minioSecretKey,
+        String minioBucket,
         String rclonePath,
         String additionalRcloneParams
 ) {
 
     public enum MigrationMode {
-        LOCAL, CLOUD, BOTH
+        LOCAL, CLOUD
     }
 
     public static final String DEFAULT_USERNAME = "sa";
@@ -98,6 +99,7 @@ public record MigrationConfig(
                 "AZ_USE_MSI", "AZ_GENERATE_DYNAMIC_SAS",
                 "GCS_SERVICE_ACCOUNT_FILE", "GCS_BUCKET", "GCS_REGION",
                 "MINIO_ENDPOINT", "MINIO_REGION", "MINIO_ACCESS_KEY", "MINIO_SECRET_KEY",
+                "MINIO_BUCKET",
                 "RCLONE", "ADDITIONAL_RCLONE_PARAMETERS"
         };
         for (String key : envKeys) {
@@ -132,7 +134,7 @@ public record MigrationConfig(
         }
 
         String provider = p.getProperty("SEMOSS_STORAGE_PROVIDER", p.getProperty("STORAGE_PROVIDER", ""));
-        if ((mode == MigrationMode.CLOUD || mode == MigrationMode.BOTH) && provider.isEmpty()) {
+        if (mode == MigrationMode.CLOUD && provider.isEmpty()) {
             throw new IllegalArgumentException(
                     "SEMOSS_STORAGE_PROVIDER is required for mode=" + mode);
         }
@@ -162,6 +164,7 @@ public record MigrationConfig(
                 p.getProperty("MINIO_REGION", ""),
                 p.getProperty("MINIO_ACCESS_KEY", ""),
                 p.getProperty("MINIO_SECRET_KEY", ""),
+                p.getProperty("MINIO_BUCKET", ""),
                 p.getProperty("RCLONE", DEFAULT_RCLONE),
                 p.getProperty("ADDITIONAL_RCLONE_PARAMETERS", "")
         );
@@ -178,10 +181,9 @@ public record MigrationConfig(
                 Modes:
                   --mode=local             Migrate local H2 databases (default)
                   --mode=cloud             Migrate H2 databases in cloud storage via RClone
-                  --mode=both              Migrate both local and cloud databases
 
                 Local options:
-                  --db-dir=PATH            Root directory containing H2 databases (required for local/both)
+                  --db-dir=PATH            Root directory containing H2 databases (required for local)
                   --backup-dir=PATH        Backup location (default: <db-dir>/.h2-backup)
 
                 Common options:
@@ -197,6 +199,7 @@ public record MigrationConfig(
                   --az-account-name=NAME   --az-primary-key=KEY --az-use-msi          --az-conn-string=STR
                   --gcs-service-account-file=PATH      --gcs-bucket=BUCKET   --gcs-region=REGION
                   --minio-endpoint=URL     --minio-region=REGION --minio-access-key=KEY --minio-secret-key=SECRET
+                  --minio-bucket=BUCKET
                   --rclone=PATH            Path to rclone binary (default: rclone)
                 """;
     }

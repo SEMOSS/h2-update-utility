@@ -62,10 +62,6 @@ public class H2MigrationService {
             switch (config.mode()) {
                 case LOCAL -> migrateLocal();
                 case CLOUD -> migrateCloud();
-                case BOTH -> {
-                    migrateLocal();
-                    migrateCloud();
-                }
             }
         } catch (Exception e) {
             LOGGER.error("Migration pipeline failed", e);
@@ -138,7 +134,14 @@ public class H2MigrationService {
                 long start = System.currentTimeMillis();
                 String dbId = relPath;
                 try {
-                    // Download
+                    // In dry-run, skip downloading entirely — just report what was found
+                    if (config.dryRun()) {
+                        report.addResult(dbId, MigrationReport.Status.SKIPPED,
+                                "Dry run - would migrate", System.currentTimeMillis() - start);
+                        continue;
+                    }
+
+                    // Download only the DB file
                     Path localFile = cloudDiscovery.downloadDatabase(remotePath, relPath);
 
                     // Check version
@@ -149,11 +152,8 @@ public class H2MigrationService {
                         continue;
                     }
 
-                    if (config.dryRun()) {
-                        report.addResult(dbId, MigrationReport.Status.SKIPPED,
-                                "Dry run - would migrate", System.currentTimeMillis() - start);
-                        continue;
-                    }
+                    // Download companion SMSS only when we know migration is needed
+                    cloudDiscovery.downloadCompanionSmss(remotePath, relPath);
 
                     // Backup, export, import
                     backupMgr.backup(localFile, stagingDir, runLabel);
@@ -251,7 +251,7 @@ public class H2MigrationService {
         return switch (provider) {
             case "s3", "amazon_s3" -> config.s3Bucket();
             case "gcs", "google_cloud_storage" -> config.gcsBucket();
-            case "minio" -> config.s3Bucket().isEmpty() ? config.minioEndpoint() : config.s3Bucket();
+            case "minio" -> config.minioBucket();
             case "azure_blob", "azure" -> ""; // Azure uses containers directly
             case "local_file_system" -> config.dbDir() != null ? config.dbDir().toString() : "";
             default -> "";

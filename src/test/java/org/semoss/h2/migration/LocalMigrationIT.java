@@ -59,6 +59,7 @@ class LocalMigrationIT {
                 "", "", "", false, false,
                 "", "", "",
                 "", "", "", "",
+                "",
                 "rclone", ""
         );
     }

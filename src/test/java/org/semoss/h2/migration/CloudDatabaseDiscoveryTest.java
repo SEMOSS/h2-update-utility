@@ -56,6 +56,7 @@ class CloudDatabaseDiscoveryTest {
                 provider.equals("minio") ? "us-east-1" : "",
                 provider.equals("minio") ? "mkey" : "",
                 provider.equals("minio") ? "msecret" : "",
+                provider.equals("minio") ? "minio-bucket" : "",
                 "rclone", ""
         );
     }

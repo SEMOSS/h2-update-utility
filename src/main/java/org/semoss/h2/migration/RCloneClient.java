@@ -25,14 +25,14 @@ public final class RCloneClient {
 
     private final String rclonePath;
     private final String additionalParams;
-    private final String remoteName;
+    private final String backendType;
     private final List<String> configFlags;
 
     private RCloneClient(String rclonePath, String additionalParams,
-                         String remoteName, List<String> configFlags) {
+                         String backendType, List<String> configFlags) {
         this.rclonePath = rclonePath;
         this.additionalParams = additionalParams;
-        this.remoteName = remoteName;
+        this.backendType = backendType;
         this.configFlags = configFlags;
     }
 
@@ -42,11 +42,12 @@ public final class RCloneClient {
      */
     public static RCloneClient fromConfig(MigrationConfig config) {
         String provider = config.storageProvider().toLowerCase();
-        String remoteName = "migration_remote";
+        String backendType;
         List<String> flags = new ArrayList<>();
 
         switch (provider) {
             case "s3", "amazon_s3" -> {
+                backendType = "s3";
                 flags.addAll(List.of(
                         "--s3-provider=AWS",
                         "--s3-region=" + config.s3Region(),
@@ -55,6 +56,7 @@ public final class RCloneClient {
                 ));
             }
             case "azure_blob", "azure" -> {
+                backendType = "azureblob";
                 if (config.azUseMsi()) {
                     flags.add("--azureblob-use-msi=true");
                 } else if (!config.azConnString().isEmpty()) {
@@ -67,12 +69,14 @@ public final class RCloneClient {
                 }
             }
             case "gcs", "google_cloud_storage" -> {
+                backendType = "gcs";
                 flags.addAll(List.of(
                         "--gcs-service-account-file=" + config.gcsServiceAccountFile(),
                         "--gcs-location=" + config.gcsRegion()
                 ));
             }
             case "minio" -> {
+                backendType = "s3";
                 flags.addAll(List.of(
                         "--s3-provider=Minio",
                         "--s3-endpoint=" + config.minioEndpoint(),
@@ -82,7 +86,7 @@ public final class RCloneClient {
                 ));
             }
             case "local_file_system" -> {
-                // No special flags; rclone uses local paths
+                backendType = "local";
             }
             default -> throw new IllegalArgumentException("Unsupported storage provider: " + provider);
         }
@@ -90,7 +94,7 @@ public final class RCloneClient {
         return new RCloneClient(
                 config.rclonePath(),
                 config.additionalRcloneParams(),
-                remoteName,
+                backendType,
                 flags
         );
     }
@@ -103,8 +107,9 @@ public final class RCloneClient {
      * @return list of relative file paths found
      */
     public List<String> listFiles(String remotePath, String include) throws IOException, InterruptedException {
-        List<String> cmd = buildCommand("lsf", remotePath);
+        List<String> cmd = buildCommand("lsf", resolveRemote(remotePath));
         cmd.add("--recursive");
+        cmd.add("--files-only");
         if (include != null && !include.isEmpty()) {
             cmd.add("--include=" + include);
         }
@@ -156,11 +161,11 @@ public final class RCloneClient {
     }
 
     private String resolveRemote(String path) {
-        // For local_file_system, use paths directly
-        if (configFlags.isEmpty() && !path.contains(":")) {
+        // For local backend, use paths directly
+        if ("local".equals(backendType)) {
             return path;
         }
-        return remoteName + ":" + path;
+        return ":" + backendType + ":" + path;
     }
 
     private List<String> buildCommand(String subcommand, String... pathArgs) {
@@ -168,12 +173,6 @@ public final class RCloneClient {
         cmd.add(rclonePath);
         cmd.add(subcommand);
         cmd.addAll(configFlags);
-
-        // Backend type for remote name
-        if (!configFlags.isEmpty()) {
-            String backendType = detectBackendType();
-            cmd.add("--" + remoteName + "-type=" + backendType);
-        }
 
         for (String arg : pathArgs) {
             cmd.add(arg);
@@ -186,15 +185,6 @@ public final class RCloneClient {
         }
 
         return cmd;
-    }
-
-    private String detectBackendType() {
-        for (String flag : configFlags) {
-            if (flag.startsWith("--s3-")) return "s3";
-            if (flag.startsWith("--azureblob-")) return "azureblob";
-            if (flag.startsWith("--gcs-")) return "google cloud storage";
-        }
-        return "local";
     }
 
     private ProcessResult execute(List<String> cmd) throws IOException, InterruptedException {
