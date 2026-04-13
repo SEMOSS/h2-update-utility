@@ -82,7 +82,6 @@ All CLI flags can be set via environment variables (matching Semoss conventions)
 | `DB_DIR` | Local database directory |
 | `BACKUP_DIR` | Backup directory |
 | `DRY_RUN` | `true`/`false` |
-| `AUTO_CLEANUP` | Delete export scripts after import |
 | `DEFAULT_USER` | Fallback DB username (default: `sa`) |
 | `DEFAULT_PASSWORD` | Fallback DB password (default: empty) |
 | `SEMOSS_STORAGE_PROVIDER` | Cloud provider |

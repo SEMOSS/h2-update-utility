@@ -11,6 +11,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -74,7 +75,9 @@ public final class MigrationReport {
         summary.put("endTime", endTime.toString());
 
         List<Map<String, Object>> databases = new ArrayList<>();
-        for (DatabaseResult r : results) {
+        List<DatabaseResult> sorted = new ArrayList<>(results);
+        sorted.sort(Comparator.comparing(r -> r.status.name()));
+        for (DatabaseResult r : sorted) {
             Map<String, Object> entry = new LinkedHashMap<>();
             entry.put("path", r.path);
             entry.put("status", r.status.name());

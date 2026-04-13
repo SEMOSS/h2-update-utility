@@ -54,13 +54,13 @@ class LocalMigrationIT {
         return new MigrationConfig(
                 MigrationConfig.MigrationMode.LOCAL,
                 scanDir, backupDir,
-                false, true, "sa", "",
+                false, "sa", "",
                 "", "", "", "", "",
                 "", "", "", false, false,
                 "", "", "",
                 "", "", "", "",
                 "",
-                "rclone", ""
+                "rclone", "", ""
         );
     }
 

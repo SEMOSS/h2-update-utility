@@ -77,10 +77,15 @@ public final class H2VersionDetector {
             return new DetectionResult(true, Map.of(), "Unable to parse MVStore header");
         }
 
-        // H2 2.x databases have format:2; H2 1.4.x uses format:1
+        // H2 2.x databases have format:2 or higher; H2 1.4.x uses format:1
         String format = header.getOrDefault("format", "");
-        if ("2".equals(format)) {
-            return new DetectionResult(false, header, "Already H2 2.x (format:2)");
+        try {
+            int formatVersion = Integer.parseInt(format);
+            if (formatVersion >= 2) {
+                return new DetectionResult(false, header, "Already H2 2.x (format:" + format + ")");
+            }
+        } catch (NumberFormatException e) {
+            // Non-numeric format — fall through to assume migration needed
         }
 
         return new DetectionResult(true, header, "H2 1.x database (format:" + format + ")");

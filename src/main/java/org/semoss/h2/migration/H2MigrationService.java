@@ -3,6 +3,7 @@ package org.semoss.h2.migration;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.sql.SQLException;
 import java.util.List;
 
@@ -160,15 +161,17 @@ public class H2MigrationService {
                     SmssCredentialReader.Credentials creds = SmssCredentialReader.readCredentials(
                             localFile, config.defaultUsername(), config.defaultPassword());
                     Path script = exporter.export(localFile, creds.username(), creds.password());
+
+                    // Preserve export script in backup directory
+                    preserveScript(script, stagingDir, config.backupDir(), runLabel);
+
                     importer.importDatabase(localFile, script, creds.username(), creds.password());
 
                     // Upload migrated file back
                     cloudDiscovery.uploadDatabase(remotePath, relPath, localFile);
 
-                    // Cleanup script
-                    if (config.autoCleanup()) {
-                        Files.deleteIfExists(script);
-                    }
+                    // Cleanup staging script (preserved copy is in backup dir)
+                    Files.deleteIfExists(script);
 
                     report.addResult(dbId, MigrationReport.Status.SUCCESS,
                             "Migrated and uploaded", System.currentTimeMillis() - start);
@@ -217,6 +220,9 @@ public class H2MigrationService {
             // 4. Export with old H2
             Path script = exporter.export(dbFile, creds.username(), creds.password());
 
+            // Preserve export script in backup directory
+            preserveScript(script, baseDir, config.backupDir(), runLabel);
+
             // 5. Import with new H2
             try {
                 importer.importDatabase(dbFile, script, creds.username(), creds.password());
@@ -227,10 +233,8 @@ public class H2MigrationService {
                 throw e;
             }
 
-            // 6. Cleanup export script
-            if (config.autoCleanup()) {
-                Files.deleteIfExists(script);
-            }
+            // 6. Cleanup local export script (preserved copy is in backup dir)
+            Files.deleteIfExists(script);
 
             report.addResult(dbId, MigrationReport.Status.SUCCESS,
                     "Migrated from H2 " + OLD_H2 + " to " + NEW_H2,
@@ -248,17 +252,38 @@ public class H2MigrationService {
      */
     private String resolveRemotePath() {
         String provider = config.storageProvider().toLowerCase();
-        return switch (provider) {
+        String bucket = switch (provider) {
             case "s3", "amazon_s3" -> config.s3Bucket();
             case "gcs", "google_cloud_storage" -> config.gcsBucket();
             case "minio" -> config.minioBucket();
-            case "azure_blob", "azure" -> ""; // Azure uses containers directly
+            case "azure_blob", "azure" -> "";
             case "local_file_system" -> config.dbDir() != null ? config.dbDir().toString() : "";
             default -> "";
         };
+        String searchPath = config.searchPath();
+        if (searchPath != null && !searchPath.isEmpty()) {
+            return bucket.isEmpty() ? searchPath : bucket + "/" + searchPath;
+        }
+        return bucket;
     }
 
     public MigrationReport getReport() {
         return report;
+    }
+
+    /**
+     * Copy the export SQL script into the backup directory, mirroring the relative path
+     * from the base directory so scripts are preserved alongside their DB backups.
+     */
+    private void preserveScript(Path script, Path baseDir, Path backupDir, String runLabel) {
+        try {
+            Path relative = baseDir.toAbsolutePath().relativize(script.toAbsolutePath());
+            Path dest = backupDir.resolve(runLabel).resolve(relative);
+            Files.createDirectories(dest.getParent());
+            Files.copy(script, dest, StandardCopyOption.REPLACE_EXISTING);
+            LOGGER.debug("Preserved export script: " + dest);
+        } catch (IOException e) {
+            LOGGER.warn("Failed to preserve export script: " + script, e);
+        }
     }
 }

@@ -19,13 +19,13 @@ class RCloneClientTest {
                 MigrationConfig.MigrationMode.CLOUD,
                 null,
                 tempDir.resolve("backup"),
-                false, false, "sa", "",
+                false, "sa", "",
                 "s3", "us-east-1", "mybucket", "AKID", "SECRET",
                 "", "", "", false, false,
                 "", "", "",
                 "", "", "", "",
                 "",
-                "rclone", ""
+                "rclone", "", ""
         );
 
         RCloneClient client = RCloneClient.fromConfig(config);
@@ -38,13 +38,13 @@ class RCloneClientTest {
                 MigrationConfig.MigrationMode.CLOUD,
                 null,
                 tempDir.resolve("backup"),
-                false, false, "sa", "",
+                false, "sa", "",
                 "azure_blob", "", "", "", "",
                 "myaccount", "mykey", "", false, false,
                 "", "", "",
                 "", "", "", "",
                 "",
-                "rclone", ""
+                "rclone", "", ""
         );
 
         RCloneClient client = RCloneClient.fromConfig(config);
@@ -57,13 +57,13 @@ class RCloneClientTest {
                 MigrationConfig.MigrationMode.CLOUD,
                 null,
                 tempDir.resolve("backup"),
-                false, false, "sa", "",
+                false, "sa", "",
                 "gcs", "", "", "", "",
                 "", "", "", false, false,
                 "/path/to/sa.json", "gcsbucket", "us-central1",
                 "", "", "", "",
                 "",
-                "rclone", ""
+                "rclone", "", ""
         );
 
         RCloneClient client = RCloneClient.fromConfig(config);
@@ -76,13 +76,13 @@ class RCloneClientTest {
                 MigrationConfig.MigrationMode.CLOUD,
                 null,
                 tempDir.resolve("backup"),
-                false, false, "sa", "",
+                false, "sa", "",
                 "minio", "", "", "", "",
                 "", "", "", false, false,
                 "", "", "",
                 "http://localhost:9000", "us-east-1", "minio-key", "minio-secret",
                 "minio-bucket",
-                "rclone", ""
+                "rclone", "", ""
         );
 
         RCloneClient client = RCloneClient.fromConfig(config);
@@ -95,13 +95,13 @@ class RCloneClientTest {
                 MigrationConfig.MigrationMode.CLOUD,
                 null,
                 tempDir.resolve("backup"),
-                false, false, "sa", "",
+                false, "sa", "",
                 "local_file_system", "", "", "", "",
                 "", "", "", false, false,
                 "", "", "",
                 "", "", "", "",
                 "",
-                "rclone", ""
+                "rclone", "", ""
         );
 
         RCloneClient client = RCloneClient.fromConfig(config);
@@ -114,13 +114,13 @@ class RCloneClientTest {
                 MigrationConfig.MigrationMode.CLOUD,
                 null,
                 tempDir.resolve("backup"),
-                false, false, "sa", "",
+                false, "sa", "",
                 "dropbox", "", "", "", "",
                 "", "", "", false, false,
                 "", "", "",
                 "", "", "", "",
                 "",
-                "rclone", ""
+                "rclone", "", ""
         );
 
         assertThrows(IllegalArgumentException.class, () -> RCloneClient.fromConfig(config));

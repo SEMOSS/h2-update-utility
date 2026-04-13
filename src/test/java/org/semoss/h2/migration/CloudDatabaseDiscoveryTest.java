@@ -40,7 +40,7 @@ class CloudDatabaseDiscoveryTest {
                 MigrationConfig.MigrationMode.CLOUD,
                 null,
                 tempDir.resolve("backup"),
-                false, false, "sa", "",
+                false, "sa", "",
                 provider,
                 provider.equals("s3") ? "us-east-1" : "",
                 provider.equals("s3") ? "bucket" : "",
@@ -57,7 +57,7 @@ class CloudDatabaseDiscoveryTest {
                 provider.equals("minio") ? "mkey" : "",
                 provider.equals("minio") ? "msecret" : "",
                 provider.equals("minio") ? "minio-bucket" : "",
-                "rclone", ""
+                "rclone", "", ""
         );
     }
 }

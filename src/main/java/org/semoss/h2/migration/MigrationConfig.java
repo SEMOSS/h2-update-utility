@@ -14,7 +14,6 @@ public record MigrationConfig(
         Path dbDir,
         Path backupDir,
         boolean dryRun,
-        boolean autoCleanup,
         String defaultUsername,
         String defaultPassword,
         // Cloud storage fields (used in cloud mode)
@@ -37,7 +36,8 @@ public record MigrationConfig(
         String minioSecretKey,
         String minioBucket,
         String rclonePath,
-        String additionalRcloneParams
+        String additionalRcloneParams,
+        String searchPath
 ) {
 
     public enum MigrationMode {
@@ -91,7 +91,7 @@ public record MigrationConfig(
 
     private static void layerEnvVars(Properties props) {
         String[] envKeys = {
-                "MODE", "DB_DIR", "BACKUP_DIR", "DRY_RUN", "AUTO_CLEANUP",
+                "MODE", "DB_DIR", "BACKUP_DIR", "DRY_RUN",
                 "DEFAULT_USER", "DEFAULT_PASSWORD",
                 "SEMOSS_STORAGE_PROVIDER",
                 "S3_REGION", "S3_BUCKET", "S3_ACCESS_KEY", "S3_SECRET_KEY",
@@ -100,7 +100,8 @@ public record MigrationConfig(
                 "GCS_SERVICE_ACCOUNT_FILE", "GCS_BUCKET", "GCS_REGION",
                 "MINIO_ENDPOINT", "MINIO_REGION", "MINIO_ACCESS_KEY", "MINIO_SECRET_KEY",
                 "MINIO_BUCKET",
-                "RCLONE", "ADDITIONAL_RCLONE_PARAMETERS"
+                "RCLONE", "ADDITIONAL_RCLONE_PARAMETERS",
+                "SEARCH_PATH"
         };
         for (String key : envKeys) {
             String val = System.getenv(key);
@@ -144,7 +145,6 @@ public record MigrationConfig(
                 dbDir,
                 backupDir,
                 bool(p, "DRY_RUN"),
-                bool(p, "AUTO_CLEANUP"),
                 p.getProperty("DEFAULT_USER", DEFAULT_USERNAME),
                 p.getProperty("DEFAULT_PASSWORD", DEFAULT_PASSWORD),
                 provider,
@@ -166,7 +166,8 @@ public record MigrationConfig(
                 p.getProperty("MINIO_SECRET_KEY", ""),
                 p.getProperty("MINIO_BUCKET", ""),
                 p.getProperty("RCLONE", DEFAULT_RCLONE),
-                p.getProperty("ADDITIONAL_RCLONE_PARAMETERS", "")
+                p.getProperty("ADDITIONAL_RCLONE_PARAMETERS", ""),
+                p.getProperty("SEARCH_PATH", "")
         );
     }
 
@@ -189,9 +190,9 @@ public record MigrationConfig(
                 Common options:
                   --config=FILE            Load configuration from a properties file
                   --dry-run                Discover databases and report without migrating
-                  --auto-cleanup           Delete backups after successful migration
                   --default-user=USER      Fallback H2 username (default: sa)
                   --default-password=PWD   Fallback H2 password (default: empty)
+                  --search-path=PATH       Subdirectory within the storage root to search (default: root)
 
                 Cloud storage (env vars or CLI flags):
                   --semoss-storage-provider=PROVIDER   s3, azure, gcs, minio, local_file_system

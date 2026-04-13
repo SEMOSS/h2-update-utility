@@ -27,7 +27,6 @@ class MigrationConfigTest {
         assertEquals(MigrationConfig.MigrationMode.LOCAL, config.mode());
         assertEquals(tempDir.toAbsolutePath().normalize(), config.dbDir());
         assertEquals(tempDir.resolve(".h2-backup").toAbsolutePath().normalize(), config.backupDir());
-        assertFalse(config.autoCleanup());
         assertFalse(config.dryRun());
         assertEquals("sa", config.defaultUsername());
         assertEquals("", config.defaultPassword());
@@ -39,7 +38,6 @@ class MigrationConfigTest {
         String[] args = {
                 "--db-dir=" + tempDir,
                 "--backup-dir=" + tempDir.resolve("bkp"),
-                "--auto-cleanup",
                 "--dry-run",
                 "--default-user=admin",
                 "--default-password=secret"
@@ -47,7 +45,6 @@ class MigrationConfigTest {
         MigrationConfig config = MigrationConfig.fromArgs(args);
 
         assertEquals(tempDir.resolve("bkp").toAbsolutePath().normalize(), config.backupDir());
-        assertTrue(config.autoCleanup());
         assertTrue(config.dryRun());
         assertEquals("admin", config.defaultUsername());
         assertEquals("secret", config.defaultPassword());

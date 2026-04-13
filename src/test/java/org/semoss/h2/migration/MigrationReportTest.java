@@ -130,8 +130,9 @@ class MigrationReportTest {
 
         List<Map<String, Object>> databases = (List<Map<String, Object>>) map.get("databases");
         assertEquals(2, databases.size());
-        assertEquals("/db/x.mv.db", databases.get(0).get("path"));
-        assertEquals("FAILED", databases.get(1).get("status"));
+        // Sorted by status alphabetically: FAILED before SUCCESS
+        assertEquals("FAILED", databases.get(0).get("status"));
+        assertEquals("/db/x.mv.db", databases.get(1).get("path"));
     }
 
     @Test

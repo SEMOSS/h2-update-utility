@@ -40,13 +40,13 @@ class H2MigrationServiceTest {
                 MigrationConfig.MigrationMode.LOCAL,
                 dbDir,
                 tempDir.resolve("backups"),
-                false, true, "sa", "",
+                false, "sa", "",
                 "", "", "", "", "",
                 "", "", "", false, false,
                 "", "", "",
                 "", "", "", "",
                 "",
-                "rclone", ""
+                "rclone", "", ""
         );
 
         H2MigrationService service = new H2MigrationService(config);
@@ -90,13 +90,13 @@ class H2MigrationServiceTest {
                 MigrationConfig.MigrationMode.LOCAL,
                 dbDir,
                 tempDir.resolve("backups"),
-                false, true, "sa", "",
+                false, "sa", "",
                 "", "", "", "", "",
                 "", "", "", false, false,
                 "", "", "",
                 "", "", "", "",
                 "",
-                "rclone", ""
+                "rclone", "", ""
         );
 
         H2MigrationService service = new H2MigrationService(config);
@@ -126,13 +126,13 @@ class H2MigrationServiceTest {
                 MigrationConfig.MigrationMode.LOCAL,
                 dbDir,
                 tempDir.resolve("backups"),
-                true, false, "sa", "",
+                true, "sa", "",
                 "", "", "", "", "",
                 "", "", "", false, false,
                 "", "", "",
                 "", "", "", "",
                 "",
-                "rclone", ""
+                "rclone", "", ""
         );
 
         H2MigrationService service = new H2MigrationService(config);
@@ -153,13 +153,13 @@ class H2MigrationServiceTest {
                 MigrationConfig.MigrationMode.LOCAL,
                 dbDir,
                 tempDir.resolve("backups"),
-                false, false, "sa", "",
+                false, "sa", "",
                 "", "", "", "", "",
                 "", "", "", false, false,
                 "", "", "",
                 "", "", "", "",
                 "",
-                "rclone", ""
+                "rclone", "", ""
         );
 
         H2MigrationService service = new H2MigrationService(config);
@@ -178,13 +178,13 @@ class H2MigrationServiceTest {
                 MigrationConfig.MigrationMode.LOCAL,
                 dbDir,
                 tempDir.resolve("backups"),
-                false, false, "sa", "",
+                false, "sa", "",
                 "", "", "", "", "",
                 "", "", "", false, false,
                 "", "", "",
                 "", "", "", "",
                 "",
-                "rclone", ""
+                "rclone", "", ""
         );
 
         H2MigrationService service = new H2MigrationService(config);
@@ -214,13 +214,13 @@ class H2MigrationServiceTest {
                 MigrationConfig.MigrationMode.LOCAL,
                 dbDir,
                 backupDir,
-                false, false, "sa", "",
+                false, "sa", "",
                 "", "", "", "", "",
                 "", "", "", false, false,
                 "", "", "",
                 "", "", "", "",
                 "",
-                "rclone", ""
+                "rclone", "", ""
         );
 
         H2MigrationService service = new H2MigrationService(config);
@@ -258,13 +258,13 @@ class H2MigrationServiceTest {
                 MigrationConfig.MigrationMode.LOCAL,
                 dbDir,
                 tempDir.resolve("backups"),
-                false, true, "sa", "",
+                false, "sa", "",
                 "", "", "", "", "",
                 "", "", "", false, false,
                 "", "", "",
                 "", "", "", "",
                 "",
-                "rclone", ""
+                "rclone", "", ""
         );
 
         H2MigrationService service = new H2MigrationService(config);
