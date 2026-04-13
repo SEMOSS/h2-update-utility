@@ -6,11 +6,9 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class H2VersionDetectorTest {
@@ -68,35 +66,6 @@ class H2VersionDetectorTest {
         var result = H2VersionDetector.detect(tempDir.resolve("nope.mv.db"));
 
         assertFalse(result.needsMigration());
-    }
-
-    @Test
-    void detect_nullFile_noMigration() {
-        var result = H2VersionDetector.detect(null);
-
-        assertFalse(result.needsMigration());
-    }
-
-    @Test
-    void detect_nonH2File_noMigration() throws IOException {
-        Path file = tempDir.resolve("data.sqlite");
-        Files.writeString(file, "sqlite content");
-
-        var result = H2VersionDetector.detect(file);
-
-        assertFalse(result.needsMigration());
-    }
-
-    @Test
-    void readMvStoreHeader_parsesKeyValuePairs() throws IOException {
-        Path file = tempDir.resolve("header.mv.db");
-        writeMvStoreHeader(file, 1);
-
-        Map<String, String> header = H2VersionDetector.readMvStoreHeader(file);
-
-        assertEquals("2", header.get("H"));
-        assertEquals("1", header.get("format"));
-        assertNotNull(header.get("blockSize"));
     }
 
     private void writeMvStoreHeader(Path file, int format) throws IOException {

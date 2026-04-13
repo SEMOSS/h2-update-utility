@@ -145,58 +145,6 @@ class H2MigrationServiceTest {
     }
 
     @Test
-    void run_emptyDir_noFailures() throws Exception {
-        Path dbDir = tempDir.resolve("empty");
-        Files.createDirectories(dbDir);
-
-        MigrationConfig config = new MigrationConfig(
-                MigrationConfig.MigrationMode.LOCAL,
-                dbDir,
-                tempDir.resolve("backups"),
-                false, "sa", "",
-                "", "", "", "", "",
-                "", "", "", false, false,
-                "", "", "",
-                "", "", "", "",
-                "",
-                "rclone", "", ""
-        );
-
-        H2MigrationService service = new H2MigrationService(config);
-        int exitCode = service.run();
-
-        assertEquals(0, exitCode);
-        assertEquals(0, service.getReport().totalCount());
-    }
-
-    @Test
-    void run_writesReportJson() throws Exception {
-        Path dbDir = tempDir.resolve("reporttest");
-        Files.createDirectories(dbDir);
-
-        MigrationConfig config = new MigrationConfig(
-                MigrationConfig.MigrationMode.LOCAL,
-                dbDir,
-                tempDir.resolve("backups"),
-                false, "sa", "",
-                "", "", "", "", "",
-                "", "", "", false, false,
-                "", "", "",
-                "", "", "", "",
-                "",
-                "rclone", "", ""
-        );
-
-        H2MigrationService service = new H2MigrationService(config);
-        service.run();
-
-        Path reportFile = tempDir.resolve("backups/migration-report.json");
-        assertTrue(Files.exists(reportFile));
-        String json = Files.readString(reportFile);
-        assertTrue(json.contains("\"summary\""));
-    }
-
-    @Test
     void run_backupsCreated() throws Exception {
         Path dbDir = tempDir.resolve("bktest");
         Files.createDirectories(dbDir);

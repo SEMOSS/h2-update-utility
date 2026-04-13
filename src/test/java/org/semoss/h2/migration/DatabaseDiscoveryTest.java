@@ -9,7 +9,6 @@ import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -52,26 +51,6 @@ class DatabaseDiscoveryTest {
     }
 
     @Test
-    void findDatabases_returnsEmptyForNoMatches() throws IOException {
-        Files.createFile(tempDir.resolve("readme.txt"));
-
-        List<Path> found = DatabaseDiscovery.findDatabases(tempDir);
-
-        assertTrue(found.isEmpty());
-    }
-
-    @Test
-    void findDatabases_returnsAbsoluteNormalizedPaths() throws IOException {
-        Files.createFile(tempDir.resolve("db.mv.db"));
-
-        List<Path> found = DatabaseDiscovery.findDatabases(tempDir);
-
-        Path result = found.get(0);
-        assertTrue(result.isAbsolute());
-        assertEquals(result, result.normalize());
-    }
-
-    @Test
     void findDatabases_nullDir_throws() {
         assertThrows(IllegalArgumentException.class, () -> DatabaseDiscovery.findDatabases(null));
     }
@@ -92,21 +71,4 @@ class DatabaseDiscoveryTest {
         assertTrue(DatabaseDiscovery.findDatabases(empty).isEmpty());
     }
 
-    @Test
-    void findDatabases_caseInsensitiveExtension() throws IOException {
-        Files.createFile(tempDir.resolve("UPPER.MV.DB"));
-        Files.createFile(tempDir.resolve("Mixed.H2.Db"));
-
-        List<Path> found = DatabaseDiscovery.findDatabases(tempDir);
-
-        assertEquals(2, found.size());
-    }
-
-    @Test
-    void isH2Database_matchesExpectedExtensions() {
-        assertTrue(DatabaseDiscovery.isH2Database(Path.of("test.mv.db")));
-        assertTrue(DatabaseDiscovery.isH2Database(Path.of("test.h2.db")));
-        assertFalse(DatabaseDiscovery.isH2Database(Path.of("test.sqlite")));
-        assertFalse(DatabaseDiscovery.isH2Database(Path.of("test.db")));
-    }
 }

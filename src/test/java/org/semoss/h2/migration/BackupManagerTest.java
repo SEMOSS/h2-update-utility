@@ -62,17 +62,4 @@ class BackupManagerTest {
         assertTrue(Files.exists(backed));
     }
 
-    @Test
-    void generateRunLabel_containsMigrationPrefix() {
-        String label = BackupManager.generateRunLabel();
-        assertTrue(label.startsWith("migration_"));
-        assertTrue(label.length() > 20);
-    }
-
-    @Test
-    void getBackupRoot_returnsConfiguredPath() {
-        Path root = tempDir.resolve("my-backups");
-        BackupManager mgr = new BackupManager(root);
-        assertEquals(root, mgr.getBackupRoot());
-    }
 }

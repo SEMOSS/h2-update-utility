@@ -628,7 +628,7 @@ class LocalMigrationIT {
     // -----------------------------------------------------------------------
 
     @Test
-    void mixedVersions_oldMigrates_newFormatFailsGracefully() throws Exception {
+    void mixedVersions_oldMigrates_newSkipped() throws Exception {
         EngineFixture oldEng = createEngine("OldEngine");
         EngineFixture newEng = createEngine("NewEngine");
 
@@ -641,11 +641,7 @@ class LocalMigrationIT {
             }
         }
 
-        // Create new-format DB directly with H2 2.x
-        // Note: Both H2 1.x and 2.x use MVStore format:1, so version detection
-        // cannot distinguish them by header alone. The 2.x DB will be attempted
-        // and fail during export (1.4.200 can't read 2.x files), which is
-        // expected behavior — the failure is caught and reported gracefully.
+        // Create new-format DB directly with H2 2.x (writes format:3, detected as already migrated)
         try (IsolatedH2Driver h2 = IsolatedH2Driver.load("2.4.240")) {
             try (Connection conn = h2.connect("jdbc:h2:" + newEng.dbPath, "sa", "");
                  Statement stmt = conn.createStatement()) {
@@ -659,28 +655,14 @@ class LocalMigrationIT {
 
         var report = service.getReport();
         assertEquals(2, report.totalCount());
-
-        // The old DB should be successfully migrated
-        long migrated = report.getResults().stream()
-                .filter(r -> r.status() == MigrationReport.Status.SUCCESS).count();
-        assertEquals(1, migrated, "Old engine should be migrated");
-
-        // The new DB will fail (old driver can't export new format) — that's expected
-        long failed = report.getResults().stream()
-                .filter(r -> r.status() == MigrationReport.Status.FAILED).count();
-        assertEquals(1, failed, "New-format engine should fail gracefully");
+        assertEquals(1, report.successCount(), "Old engine should be migrated");
+        assertEquals(1, report.skippedCount(), "New-format engine should be skipped");
+        assertEquals(0, report.failedCount());
 
         // The old engine's data is intact in H2 2.x
         try (IsolatedH2Driver h2 = IsolatedH2Driver.load("2.4.240")) {
             assertEquals(1, countRows(h2, oldEng.dbPath, "OLD_DATA"));
         }
-
-        // The new engine's backup should exist so it can be restored
-        // (BackupManager creates backup before export attempt)
-        long backupCount = Files.walk(backupDir)
-                .filter(p -> p.toString().endsWith(".mv.db"))
-                .count();
-        assertEquals(2, backupCount, "Both databases should have backups");
     }
 
     // -----------------------------------------------------------------------

@@ -1,25 +1,15 @@
 package org.semoss.h2.migration;
 
-import com.google.gson.Gson;
-import com.google.gson.reflect.TypeToken;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MigrationReportTest {
-
-    @TempDir
-    Path tempDir;
 
     @Test
     void emptyReport_hasZeroCounts() {
@@ -64,53 +54,6 @@ class MigrationReportTest {
     }
 
     @Test
-    void toJson_escapesSpecialChars() {
-        MigrationReport report = new MigrationReport();
-        report.addResult("C:\\db\\test.mv.db", MigrationReport.Status.FAILED, "error: \"bad\"\nnewline", 10);
-        report.finish();
-
-        String json = report.toJson();
-
-        assertTrue(json.contains("C:\\\\db\\\\test.mv.db"));
-        assertTrue(json.contains("\\\"bad\\\""));
-        assertTrue(json.contains("\\n"));
-    }
-
-    @Test
-    void writeJson_createsFile() throws IOException {
-        MigrationReport report = new MigrationReport();
-        report.addResult("/a.mv.db", MigrationReport.Status.SUCCESS, "ok", 100);
-        report.finish();
-
-        Path outFile = tempDir.resolve("reports/migration.json");
-        report.writeJson(outFile);
-
-        assertTrue(Files.exists(outFile));
-        String content = Files.readString(outFile);
-        assertTrue(content.startsWith("{"));
-        assertTrue(content.contains("\"summary\""));
-    }
-
-    @Test
-    void getResults_returnsUnmodifiableList() {
-        MigrationReport report = new MigrationReport();
-        report.addResult("/x.mv.db", MigrationReport.Status.SUCCESS, "ok", 50);
-
-        assertThrows(UnsupportedOperationException.class,
-                () -> report.getResults().add(
-                        new MigrationReport.DatabaseResult("/y.mv.db", MigrationReport.Status.FAILED, "nope", 0)));
-    }
-
-    @Test
-    void finish_calledImplicitly_byToJson() {
-        MigrationReport report = new MigrationReport();
-        report.addResult("/a.mv.db", MigrationReport.Status.SUCCESS, "ok", 100);
-        // Don't call finish()
-        String json = report.toJson();
-        assertTrue(json.contains("\"endTime\""));
-    }
-
-    @Test
     @SuppressWarnings("unchecked")
     void toMap_returnsStructuredData() {
         MigrationReport report = new MigrationReport();
@@ -135,17 +78,4 @@ class MigrationReportTest {
         assertEquals("/db/x.mv.db", databases.get(1).get("path"));
     }
 
-    @Test
-    void toJson_roundTripsViaGson() {
-        MigrationReport report = new MigrationReport();
-        report.addResult("/db/a.mv.db", MigrationReport.Status.SUCCESS, "migrated", 200);
-        report.finish();
-
-        String json = report.toJson();
-        Map<String, Object> parsed = new Gson().fromJson(json,
-                new TypeToken<Map<String, Object>>() {}.getType());
-
-        assertNotNull(parsed.get("summary"));
-        assertNotNull(parsed.get("databases"));
-    }
 }

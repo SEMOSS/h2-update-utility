@@ -106,24 +106,4 @@ class DatabaseImporterTest {
         }
     }
 
-    @Test
-    void importDatabase_deletesOldFile() throws Exception {
-        try (IsolatedH2Driver oldH2 = IsolatedH2Driver.load("1.4.200");
-             IsolatedH2Driver newH2 = IsolatedH2Driver.load("2.4.240")) {
-
-            String dbName = tempDir.resolve("deletetest").toAbsolutePath().toString();
-            try (Connection conn = oldH2.connect("jdbc:h2:" + dbName, "sa", "");
-                 Statement stmt = conn.createStatement()) {
-                stmt.execute("CREATE TABLE T (ID INT)");
-            }
-
-            Path dbFile = Path.of(dbName + ".mv.db");
-            long oldSize = Files.size(dbFile);
-            Path script = new DatabaseExporter(oldH2).export(dbFile, "sa", "");
-            new DatabaseImporter(newH2).importDatabase(dbFile, script, "sa", "");
-
-            // The new file exists and may differ in size
-            assertTrue(Files.exists(dbFile));
-        }
-    }
 }

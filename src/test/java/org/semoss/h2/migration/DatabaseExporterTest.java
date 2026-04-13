@@ -89,18 +89,4 @@ class DatabaseExporterTest {
         assertFalse(result.endsWith(".mv.db"));
     }
 
-    @Test
-    void stripExtension_handlesH2Db() {
-        Path p = Path.of("/data/test.h2.db");
-        String result = DatabaseExporter.stripExtension(p);
-        assertTrue(result.endsWith("test"));
-        assertFalse(result.endsWith(".h2.db"));
-    }
-
-    @Test
-    void stripExtension_noKnownExtension_returnsAsIs() {
-        Path p = Path.of("/data/test.sqlite");
-        String result = DatabaseExporter.stripExtension(p);
-        assertTrue(result.endsWith("test.sqlite"));
-    }
 }

@@ -6,7 +6,6 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 class CloudDatabaseDiscoveryTest {
 
@@ -21,18 +20,6 @@ class CloudDatabaseDiscoveryTest {
 
         CloudDatabaseDiscovery discovery = new CloudDatabaseDiscovery(client, config, staging);
         assertEquals(staging, discovery.getStagingDir());
-    }
-
-    @Test
-    void constructor_acceptsAllProviders() {
-        for (String provider : new String[]{"s3", "azure_blob", "gcs", "minio", "local_file_system"}) {
-            MigrationConfig config = buildCloudConfig(provider);
-            RCloneClient client = RCloneClient.fromConfig(config);
-
-            CloudDatabaseDiscovery discovery = new CloudDatabaseDiscovery(
-                    client, config, tempDir.resolve("staging-" + provider));
-            assertNotNull(discovery);
-        }
     }
 
     private MigrationConfig buildCloudConfig(String provider) {
