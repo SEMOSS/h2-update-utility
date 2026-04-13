@@ -1,18 +1,17 @@
 package org.semoss.h2.migration;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.SQLException;
 import java.util.List;
-import java.util.logging.Level;
-import java.util.logging.LogManager;
-import java.util.logging.Logger;
+
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 public class H2MigrationService {
 
-    private static final Logger LOGGER = Logger.getLogger(H2MigrationService.class.getName());
+    private static final Logger LOGGER = LogManager.getLogger(H2MigrationService.class);
     private static final String OLD_H2 = "1.4.200";
     private static final String NEW_H2 = "2.4.240";
 
@@ -24,19 +23,7 @@ public class H2MigrationService {
         this.report = new MigrationReport();
     }
 
-    private static void configureLogging() {
-        try (InputStream is = H2MigrationService.class.getClassLoader()
-                .getResourceAsStream("logging.properties")) {
-            if (is != null) {
-                LogManager.getLogManager().readConfiguration(is);
-            }
-        } catch (IOException ignored) {
-            // fall back to JVM defaults
-        }
-    }
-
     public static void main(String[] args) {
-        configureLogging();
 
         if (args.length == 0 || "--help".equals(args[0])) {
             System.out.println(MigrationConfig.usage());
@@ -81,7 +68,7 @@ public class H2MigrationService {
                 }
             }
         } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "Migration pipeline failed", e);
+            LOGGER.error("Migration pipeline failed", e);
             report.addResult("PIPELINE", MigrationReport.Status.FAILED, e.getMessage(), 0);
         }
 
@@ -93,7 +80,7 @@ public class H2MigrationService {
             report.writeJson(reportFile);
             LOGGER.info("Report written to " + reportFile);
         } catch (IOException e) {
-            LOGGER.log(Level.WARNING, "Failed to write report", e);
+            LOGGER.warn("Failed to write report", e);
         }
 
         LOGGER.info("Migration complete: " + report.successCount() + " succeeded, "
@@ -187,7 +174,7 @@ public class H2MigrationService {
                             "Migrated and uploaded", System.currentTimeMillis() - start);
 
                 } catch (Exception e) {
-                    LOGGER.log(Level.WARNING, "Failed to migrate cloud DB: " + relPath, e);
+                    LOGGER.warn("Failed to migrate cloud DB: " + relPath, e);
                     report.addResult(dbId, MigrationReport.Status.FAILED,
                             e.getMessage(), System.currentTimeMillis() - start);
                 }
@@ -235,7 +222,7 @@ public class H2MigrationService {
                 importer.importDatabase(dbFile, script, creds.username(), creds.password());
             } catch (SQLException e) {
                 // Restore backup on import failure
-                LOGGER.log(Level.WARNING, "Import failed for " + dbFile + ", restoring backup", e);
+                LOGGER.warn("Import failed for " + dbFile + ", restoring backup", e);
                 backupMgr.restore(backupFile, dbFile);
                 throw e;
             }
@@ -250,7 +237,7 @@ public class H2MigrationService {
                     System.currentTimeMillis() - start);
 
         } catch (Exception e) {
-            LOGGER.log(Level.WARNING, "Failed to migrate " + dbFile, e);
+            LOGGER.warn("Failed to migrate " + dbFile, e);
             report.addResult(dbId, MigrationReport.Status.FAILED,
                     e.getMessage(), System.currentTimeMillis() - start);
         }

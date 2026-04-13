@@ -11,8 +11,9 @@ import java.sql.Connection;
 import java.sql.Driver;
 import java.sql.SQLException;
 import java.util.Properties;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * Loads an H2 JDBC driver from an embedded JAR resource using an isolated
@@ -23,7 +24,7 @@ import java.util.logging.Logger;
  */
 public final class IsolatedH2Driver implements AutoCloseable {
 
-    private static final Logger LOGGER = Logger.getLogger(IsolatedH2Driver.class.getName());
+    private static final Logger LOGGER = LogManager.getLogger(IsolatedH2Driver.class);
     private static final String DRIVER_CLASS = "org.h2.Driver";
 
     private final String version;
@@ -106,12 +107,12 @@ public final class IsolatedH2Driver implements AutoCloseable {
         try {
             classLoader.close();
         } catch (IOException e) {
-            LOGGER.log(Level.WARNING, "Error closing classloader for H2 v" + version, e);
+            LOGGER.warn("Error closing classloader for H2 v" + version, e);
         }
         try {
             Files.deleteIfExists(tempJar);
         } catch (IOException e) {
-            LOGGER.log(Level.WARNING, "Error deleting temp JAR for H2 v" + version, e);
+            LOGGER.warn("Error deleting temp JAR for H2 v" + version, e);
         }
     }
 }

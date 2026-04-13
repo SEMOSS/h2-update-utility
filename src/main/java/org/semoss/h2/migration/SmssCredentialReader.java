@@ -4,8 +4,9 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * Reads USERNAME and PASSWORD from Semoss {@code .smss} configuration files.
@@ -19,7 +20,7 @@ import java.util.logging.Logger;
  */
 public final class SmssCredentialReader {
 
-    private static final Logger LOGGER = Logger.getLogger(SmssCredentialReader.class.getName());
+    private static final Logger LOGGER = LogManager.getLogger(SmssCredentialReader.class);
 
     private SmssCredentialReader() {}
 
@@ -42,7 +43,7 @@ public final class SmssCredentialReader {
     public static Credentials readCredentials(Path dbFile, String fallbackUser, String fallbackPass) {
         Path smssFile = findSmssFile(dbFile);
         if (smssFile == null) {
-            LOGGER.fine("No .smss file found for " + dbFile + ", using defaults");
+            LOGGER.debug("No .smss file found for " + dbFile + ", using defaults");
             return new Credentials(fallbackUser, fallbackPass);
         }
 
@@ -78,7 +79,7 @@ public final class SmssCredentialReader {
                     .findFirst()
                     .orElse(null);
         } catch (IOException e) {
-            LOGGER.log(Level.WARNING, "Error listing directory for .smss: " + parent, e);
+            LOGGER.warn("Error listing directory for .smss: " + parent, e);
             return null;
         }
     }
@@ -110,10 +111,10 @@ public final class SmssCredentialReader {
                 }
             }
         } catch (IOException e) {
-            LOGGER.log(Level.WARNING, "Error reading .smss file: " + smssFile, e);
+            LOGGER.warn("Error reading .smss file: " + smssFile, e);
         }
 
-        LOGGER.fine("Credentials from " + smssFile + ": user=" + username);
+        LOGGER.debug("Credentials from " + smssFile + ": user=" + username);
         return new Credentials(username, password);
     }
 }

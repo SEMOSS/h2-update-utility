@@ -4,7 +4,9 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.logging.Logger;
+
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * Discovers H2 database files in cloud storage via RClone,
@@ -21,7 +23,7 @@ import java.util.logging.Logger;
  */
 public final class CloudDatabaseDiscovery {
 
-    private static final Logger LOGGER = Logger.getLogger(CloudDatabaseDiscovery.class.getName());
+    private static final Logger LOGGER = LogManager.getLogger(CloudDatabaseDiscovery.class);
 
     private final RCloneClient rclone;
     private final MigrationConfig config;
@@ -112,7 +114,7 @@ public final class CloudDatabaseDiscovery {
                 rclone.download(fullSmssRemote, localSmss);
             }
         } catch (IOException e) {
-            LOGGER.fine("No companion SMSS found for " + relativeDbPath + ": " + e.getMessage());
+            LOGGER.debug("No companion SMSS found for " + relativeDbPath + ": " + e.getMessage());
         }
     }
 

@@ -6,7 +6,9 @@ import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.logging.Logger;
+
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * Exports an H2 1.x database to a SQL script using the SCRIPT TO command.
@@ -14,7 +16,7 @@ import java.util.logging.Logger;
  */
 public final class DatabaseExporter {
 
-    private static final Logger LOGGER = Logger.getLogger(DatabaseExporter.class.getName());
+    private static final Logger LOGGER = LogManager.getLogger(DatabaseExporter.class);
     private static final String OLD_H2_VERSION = "1.4.200";
 
     private final IsolatedH2Driver driver;

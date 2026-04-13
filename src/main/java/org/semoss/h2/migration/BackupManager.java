@@ -6,7 +6,9 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.logging.Logger;
+
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * Creates and restores backups of H2 database files before migration.
@@ -14,7 +16,7 @@ import java.util.logging.Logger;
  */
 public final class BackupManager {
 
-    private static final Logger LOGGER = Logger.getLogger(BackupManager.class.getName());
+    private static final Logger LOGGER = LogManager.getLogger(BackupManager.class);
     private static final DateTimeFormatter TS_FMT = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss");
 
     private final Path backupRoot;

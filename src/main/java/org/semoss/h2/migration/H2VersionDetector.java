@@ -7,8 +7,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * Detects whether an H2 database file needs migration by reading its file header.
@@ -22,7 +23,7 @@ import java.util.logging.Logger;
  */
 public final class H2VersionDetector {
 
-    private static final Logger LOGGER = Logger.getLogger(H2VersionDetector.class.getName());
+    private static final Logger LOGGER = LogManager.getLogger(H2VersionDetector.class);
 
     /** Max bytes to read from file header (the header line is within the first 4KB). */
     private static final int HEADER_READ_SIZE = 4096;
@@ -110,7 +111,7 @@ public final class H2VersionDetector {
                 }
             }
         } catch (IOException e) {
-            LOGGER.log(Level.WARNING, "Failed to read MVStore header from " + dbFile, e);
+            LOGGER.warn("Failed to read MVStore header from " + dbFile, e);
         }
         return result;
     }

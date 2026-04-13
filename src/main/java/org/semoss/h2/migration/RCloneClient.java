@@ -7,8 +7,9 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * Wraps the RClone CLI to list, download, and upload H2 database files
@@ -19,7 +20,7 @@ import java.util.logging.Logger;
  */
 public final class RCloneClient {
 
-    private static final Logger LOGGER = Logger.getLogger(RCloneClient.class.getName());
+    private static final Logger LOGGER = LogManager.getLogger(RCloneClient.class);
     private static final long TIMEOUT_SECONDS = 600;
 
     private final String rclonePath;
@@ -197,7 +198,7 @@ public final class RCloneClient {
     }
 
     private ProcessResult execute(List<String> cmd) throws IOException, InterruptedException {
-        LOGGER.fine("Executing: " + String.join(" ", cmd));
+        LOGGER.debug("Executing: " + String.join(" ", cmd));
         ProcessBuilder pb = new ProcessBuilder(cmd);
         pb.redirectErrorStream(false);
         Process proc = pb.start();
@@ -218,7 +219,7 @@ public final class RCloneClient {
 
         int exitCode = proc.exitValue();
         if (exitCode != 0) {
-            LOGGER.log(Level.WARNING, "rclone exit " + exitCode + ": " + stderr);
+            LOGGER.warn("rclone exit " + exitCode + ": " + stderr);
         }
         return new ProcessResult(exitCode, stdout, stderr);
     }

@@ -6,7 +6,9 @@ import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.logging.Logger;
+
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * Imports a SQL script into a new H2 2.x database using RUNSCRIPT FROM.
@@ -14,7 +16,7 @@ import java.util.logging.Logger;
  */
 public final class DatabaseImporter {
 
-    private static final Logger LOGGER = Logger.getLogger(DatabaseImporter.class.getName());
+    private static final Logger LOGGER = LogManager.getLogger(DatabaseImporter.class);
 
     private final IsolatedH2Driver driver;
 

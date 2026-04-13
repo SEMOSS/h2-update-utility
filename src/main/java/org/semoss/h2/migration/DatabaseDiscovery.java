@@ -8,8 +8,9 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * Recursively discovers H2 database files ({@code .mv.db} and {@code .h2.db})
@@ -17,7 +18,7 @@ import java.util.logging.Logger;
  */
 public final class DatabaseDiscovery {
 
-    private static final Logger LOGGER = Logger.getLogger(DatabaseDiscovery.class.getName());
+    private static final Logger LOGGER = LogManager.getLogger(DatabaseDiscovery.class);
 
     static final String MV_DB_SUFFIX = ".mv.db";
     static final String H2_DB_SUFFIX = ".h2.db";
@@ -56,7 +57,7 @@ public final class DatabaseDiscovery {
 
             @Override
             public FileVisitResult visitFileFailed(Path file, IOException exc) {
-                LOGGER.log(Level.WARNING, "Skipping inaccessible path: " + file, exc);
+                LOGGER.warn("Skipping inaccessible path: " + file, exc);
                 return FileVisitResult.CONTINUE;
             }
         });
