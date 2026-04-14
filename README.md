@@ -150,6 +150,83 @@ H2MigrationService      ← Orchestrator
 mvn test
 ```
 
+## Deployment Scenarios
+
+### Important: Stop Semoss Before Migrating
+
+H2 databases hold file locks during operation. **All Semoss instances must be stopped** before running the migration tool to avoid corruption or lock conflicts.
+
+### Single Node
+
+Run the tool once against the Semoss `db/` directory:
+
+```bash
+java -jar h2-migration-service.jar \
+  --mode=local \
+  --db-dir=/opt/semoss/db \
+  --backup-dir=/opt/semoss/h2-backups
+```
+
+### Non-Cloud Cluster (Shared Filesystem)
+
+All nodes mount the same `db/` directory (NFS, shared volume, SAN). Since there is only one copy of each database file, run the migration **once from any node**:
+
+1. Stop all Semoss nodes
+2. Run the migration from any node with access to the shared filesystem
+3. Upgrade all nodes to the Semoss version built against H2 2.x
+4. Start all nodes
+
+### Non-Cloud Cluster (Independent Local Storage)
+
+Each node has its own `db/` directory (e.g. separate Docker volumes). Run the migration **on every node**:
+
+1. Stop Semoss on all nodes
+2. Run the migration on each node:
+   ```bash
+   # On each node
+   java -jar h2-migration-service.jar \
+     --mode=local \
+     --db-dir=/opt/semoss/db \
+     --backup-dir=/opt/semoss/h2-backups
+   ```
+   This can be automated via Ansible, a Kubernetes Job (one per PV), or an init container that runs before Semoss boots.
+3. Upgrade and start all nodes
+
+### Cloud-Enabled Cluster (`SEMOSS_IS_CLUSTER=true`)
+
+Semoss cloud clusters store **only user/client engine databases** in cloud storage (S3/MinIO/Azure/GCS). System databases (security, scheduler, LocalMasterDatabase, UserTrackingDatabase, Notification, etc.) are **not tracked in cloud storage** — they exist only on each pod's local filesystem and are synced through the container image or volume mounts.
+
+This means cloud migration requires **two steps**:
+
+1. **Cloud mode** — migrate user engine databases in the bucket:
+   ```bash
+   java -jar h2-migration-service.jar \
+     --mode=cloud \
+     --backup-dir=/tmp/h2-backups \
+     --storage-provider=s3 \
+     --s3-region=us-east-1 \
+     --s3-bucket=my-semoss-bucket \
+     --s3-access-key=AKID \
+     --s3-secret-key=SECRET
+   ```
+
+2. **Local mode on each pod** — migrate system databases that only exist locally:
+   ```bash
+   java -jar h2-migration-service.jar \
+     --mode=local \
+     --db-dir=/opt/semoss/db \
+     --backup-dir=/opt/semoss/h2-backups
+   ```
+   Use a Kubernetes init container or Job to run this on every pod before Semoss starts.
+
+Full procedure:
+
+1. Stop all Semoss pods
+2. Run `--mode=cloud` once to migrate user engines in the bucket
+3. Run `--mode=local` on each pod to migrate system databases
+4. Upgrade all pods to the Semoss version built against H2 2.x
+5. Start all pods — each will pull the migrated user engines from cloud storage on boot
+
 ## Migration Report
 
 After migration, a JSON report is written to `{backup-dir}/migration-report.json`:
