@@ -93,27 +93,43 @@ public final class CloudDatabaseDiscovery {
      */
     public void downloadCompanionSmss(String remotePath, String relativeDbPath)
             throws IOException, InterruptedException {
-        // Try to find smss in same directory
-        String dir = relativeDbPath.contains("/")
+        // The DB file is typically at: engineAlias__uuid/database.mv.db
+        // The SMSS file lives as a sibling of the engine folder: engineAlias__uuid.smss
+        // So we need to search the parent of the DB's directory (i.e. the directory
+        // containing the engine folder) AND the DB's own directory.
+
+        String dbDir = relativeDbPath.contains("/")
                 ? relativeDbPath.substring(0, relativeDbPath.lastIndexOf('/'))
                 : "";
-        String smssDir = dir.isEmpty() ? "" : dir;
 
+        // Search 1: Parent directory of the engine folder (where .smss siblings live)
+        // e.g. for "EngineAlias__uuid/database.mv.db", search at the root for *.smss
+        if (!dbDir.isEmpty()) {
+            String parentDir = dbDir.contains("/")
+                    ? dbDir.substring(0, dbDir.lastIndexOf('/'))
+                    : "";
+            downloadSmssFromDir(remotePath, parentDir);
+        }
+
+        // Search 2: Same directory as the DB file (fallback for flat layouts)
+        downloadSmssFromDir(remotePath, dbDir);
+    }
+
+    private void downloadSmssFromDir(String remotePath, String dir)
+            throws InterruptedException {
         try {
-            List<String> smssFiles = rclone.listFiles(
-                    remotePath + (smssDir.isEmpty() ? "" : "/" + smssDir),
-                    "*.smss"
-            );
+            String searchPath = remotePath + (dir.isEmpty() ? "" : "/" + dir);
+            List<String> smssFiles = rclone.listFiles(searchPath, "*.smss");
             for (String smss : smssFiles) {
                 String fullSmssRemote = remotePath + "/" +
-                        (smssDir.isEmpty() ? smss : smssDir + "/" + smss);
+                        (dir.isEmpty() ? smss : dir + "/" + smss);
                 Path localSmss = stagingDir.resolve(
-                        smssDir.isEmpty() ? smss : smssDir + "/" + smss);
+                        dir.isEmpty() ? smss : dir + "/" + smss);
                 Files.createDirectories(localSmss.getParent());
                 rclone.download(fullSmssRemote, localSmss);
             }
         } catch (IOException e) {
-            LOGGER.debug("No companion SMSS found for " + relativeDbPath + ": " + e.getMessage());
+            LOGGER.debug("No .smss files found in " + dir + ": " + e.getMessage());
         }
     }
 
