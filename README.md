@@ -47,12 +47,109 @@ java -jar target/h2-migration-service.jar \
 java -jar target/h2-migration-service.jar \
   --mode=cloud \
   --backup-dir=/tmp/h2-backups \
-  --storage-provider=s3 \
+  --semoss-storage-provider=s3 \
   --s3-region=us-east-1 \
   --s3-bucket=my-semoss-bucket \
   --s3-access-key=AKID \
   --s3-secret-key=SECRET
 ```
+
+#### AWS S3 Setup with Temporary Credentials (STS)
+
+For testing or environments where long-lived credentials are not desirable, you can use
+AWS STS to generate temporary access keys that expire automatically.
+
+**1. Create an IAM policy** scoped to your bucket (IAM → Policies → Create policy → JSON):
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["s3:PutObject", "s3:GetObject", "s3:ListBucket", "s3:DeleteObject"],
+      "Resource": [
+        "arn:aws:s3:::YOUR-BUCKET-NAME",
+        "arn:aws:s3:::YOUR-BUCKET-NAME/*"
+      ]
+    }
+  ]
+}
+```
+
+**2. Create an IAM role** (IAM → Roles → Create role):
+
+- Trusted entity: **AWS account → This account**
+- Attach the policy created above
+- Note the role ARN (e.g. `arn:aws:iam::123456789012:role/h2-migration-test`)
+
+**3. Update the role's trust policy** to allow your identity to assume it
+(IAM → Roles → your role → Trust relationships → Edit):
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::123456789012:role/YOUR_CALLER_ROLE"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+```
+
+> **Tip:** Run `aws sts get-caller-identity` to find your current identity ARN.
+> If you are using AWS SSO / Identity Center, the role ARN may include a path prefix
+> (e.g. `role/aws-reserved/sso.amazonaws.com/YourRole`). The trust policy principal
+> must match the full ARN exactly.
+
+**4. Assume the role** to get temporary credentials:
+
+```bash
+aws sts assume-role \
+  --role-arn arn:aws:iam::123456789012:role/h2-migration-test \
+  --role-session-name h2-migration-test \
+  --duration-seconds 3600
+```
+
+> If the trust policy includes an `sts:ExternalId` condition, add `--external-id <value>`.
+
+This returns `AccessKeyId`, `SecretAccessKey`, and `SessionToken` (valid for 1 hour).
+
+**5. Run the migration** with the temporary credentials:
+
+```bash
+java -jar target/h2-migration-service.jar \
+  --mode=cloud \
+  --semoss-storage-provider=s3 \
+  --s3-region=us-east-2 \
+  --s3-bucket=my-semoss-bucket \
+  --s3-access-key=<AccessKeyId> \
+  --s3-secret-key=<SecretAccessKey> \
+  --additional-rclone-parameters="--s3-session-token=<SessionToken>" \
+  --dry-run
+```
+
+Or using environment variables:
+
+```bash
+export S3_ACCESS_KEY="<AccessKeyId>"
+export S3_SECRET_KEY="<SecretAccessKey>"
+export ADDITIONAL_RCLONE_PARAMETERS="--s3-session-token=<SessionToken>"
+
+java -jar target/h2-migration-service.jar \
+  --mode=cloud \
+  --semoss-storage-provider=s3 \
+  --s3-region=us-east-2 \
+  --s3-bucket=my-semoss-bucket \
+  --dry-run
+```
+
+> Start with `--dry-run` to verify bucket connectivity and database discovery
+> before running an actual migration.
 
 ### Cloud Mode (MinIO)
 

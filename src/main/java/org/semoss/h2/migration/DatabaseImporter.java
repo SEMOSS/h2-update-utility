@@ -46,7 +46,7 @@ public final class DatabaseImporter {
 
         try (Connection conn = driver.connect(url, username, password);
              Statement stmt = conn.createStatement()) {
-            stmt.execute("RUNSCRIPT FROM '" + scriptFile.toAbsolutePath().toString().replace("'", "''") + "'");
+            stmt.execute("RUNSCRIPT FROM '" + scriptFile.toAbsolutePath().toString().replace("'", "''") + "' FROM_1X");
         }
 
         long size = Files.exists(dbFile) ? Files.size(dbFile) : 0;
