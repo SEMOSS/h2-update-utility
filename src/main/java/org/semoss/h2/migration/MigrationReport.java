@@ -19,6 +19,23 @@ import java.util.Map;
 /**
  * Collects per-database migration results and writes a JSON summary report.
  * {@link #toMap()} returns the structured report; {@link #toJson()} serialises it via Gson.
+ *
+ * <p>Each {@link DatabaseResult} carries:
+ * <ul>
+ *   <li>Status / reason / durationMs for the basic outcome.</li>
+ *   <li>{@code sqlState}, {@code errorCode}, {@code errorClass}, {@code failingStatement}
+ *       — populated when a {@link java.sql.SQLException} fails the migration (Category K).</li>
+ *   <li>{@code preservedScriptPath} — absolute path to the export SQL script kept in the
+ *       backup directory, so support can inspect exactly what H2 2.x rejected.</li>
+ *   <li>{@code warnings} — non-blocking pre-flight / runtime observations (e.g. "script is
+ *       180MB — consider raising heap", "CREATE AGGREGATE detected and stripped",
+ *       "identifier ROW present — quoted via rewriter").</li>
+ *   <li>{@code transformations} — structured map describing every modification applied to
+ *       the database during migration (type-alias replacements by token, non-keywords
+ *       passed on the target URL, aggregates stripped and later restored, pre-migration
+ *       script size, mode flags in effect, smoke-open outcome). This is the primary
+ *       on-disk record of what changed about the DB beyond an H2-version bump.</li>
+ * </ul>
  */
 public final class MigrationReport {
 
@@ -26,12 +43,59 @@ public final class MigrationReport {
 
     public enum Status { SUCCESS, FAILED, SKIPPED }
 
-    public record DatabaseResult(
-            String path,
-            Status status,
-            String reason,
-            long durationMs
-    ) {}
+    /**
+     * A single database's migration outcome. Mutable (fields are filled in progressively
+     * through the pipeline) to avoid threading a builder through every step.
+     */
+    public static final class DatabaseResult {
+        private final String path;
+        private Status status;
+        private String reason;
+        private long durationMs;
+
+        // Category K — detailed error context
+        private String sqlState;
+        private Integer errorCode;
+        private String errorClass;
+        private String failingStatement;
+
+        // Artifacts
+        private String preservedScriptPath;
+
+        // Observability
+        private final List<String> warnings = new ArrayList<>();
+        private final Map<String, Object> transformations = new LinkedHashMap<>();
+
+        public DatabaseResult(String path, Status status, String reason, long durationMs) {
+            this.path = path;
+            this.status = status;
+            this.reason = reason;
+            this.durationMs = durationMs;
+        }
+
+        public String path() { return path; }
+        public Status status() { return status; }
+        public String reason() { return reason; }
+        public long durationMs() { return durationMs; }
+        public String sqlState() { return sqlState; }
+        public Integer errorCode() { return errorCode; }
+        public String errorClass() { return errorClass; }
+        public String failingStatement() { return failingStatement; }
+        public String preservedScriptPath() { return preservedScriptPath; }
+        public List<String> warnings() { return Collections.unmodifiableList(warnings); }
+        public Map<String, Object> transformations() { return Collections.unmodifiableMap(transformations); }
+
+        public DatabaseResult status(Status s) { this.status = s; return this; }
+        public DatabaseResult reason(String r) { this.reason = r; return this; }
+        public DatabaseResult durationMs(long d) { this.durationMs = d; return this; }
+        public DatabaseResult sqlState(String s) { this.sqlState = s; return this; }
+        public DatabaseResult errorCode(Integer c) { this.errorCode = c; return this; }
+        public DatabaseResult errorClass(String c) { this.errorClass = c; return this; }
+        public DatabaseResult failingStatement(String s) { this.failingStatement = s; return this; }
+        public DatabaseResult preservedScriptPath(String p) { this.preservedScriptPath = p; return this; }
+        public DatabaseResult addWarning(String w) { warnings.add(w); return this; }
+        public DatabaseResult transformation(String key, Object value) { transformations.put(key, value); return this; }
+    }
 
     private final Instant startTime;
     private final List<DatabaseResult> results = new ArrayList<>();
@@ -41,8 +105,14 @@ public final class MigrationReport {
         this.startTime = Instant.now();
     }
 
-    public void addResult(String path, Status status, String reason, long durationMs) {
-        results.add(new DatabaseResult(path, status, reason, durationMs));
+    /**
+     * Add a basic result (backward-compatible). Returns the {@link DatabaseResult} so
+     * callers can enrich it with transformations / warnings / error context before moving on.
+     */
+    public DatabaseResult addResult(String path, Status status, String reason, long durationMs) {
+        DatabaseResult r = new DatabaseResult(path, status, reason, durationMs);
+        results.add(r);
+        return r;
     }
 
     public void finish() {
@@ -83,6 +153,13 @@ public final class MigrationReport {
             entry.put("status", r.status.name());
             entry.put("reason", r.reason);
             entry.put("durationMs", r.durationMs);
+            if (r.preservedScriptPath != null) entry.put("preservedScriptPath", r.preservedScriptPath);
+            if (r.sqlState != null) entry.put("sqlState", r.sqlState);
+            if (r.errorCode != null) entry.put("errorCode", r.errorCode);
+            if (r.errorClass != null) entry.put("errorClass", r.errorClass);
+            if (r.failingStatement != null) entry.put("failingStatement", r.failingStatement);
+            if (!r.warnings.isEmpty()) entry.put("warnings", new ArrayList<>(r.warnings));
+            if (!r.transformations.isEmpty()) entry.put("transformations", new LinkedHashMap<>(r.transformations));
             databases.add(entry);
         }
 

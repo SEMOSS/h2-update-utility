@@ -55,6 +55,55 @@ class MigrationReportTest {
 
     @Test
     @SuppressWarnings("unchecked")
+    void failedResult_capturesSqlFailureContext() {
+        MigrationReport report = new MigrationReport();
+        report.addResult("/db/bad.mv.db", MigrationReport.Status.FAILED, "syntax error", 100)
+                .sqlState("42000")
+                .errorCode(42001)
+                .errorClass("org.h2.jdbc.JdbcSQLSyntaxErrorException")
+                .failingStatement("CREATE TABLE FOO(VALUE VARCHAR(50)")
+                .preservedScriptPath("/backups/run1/bad_export.sql")
+                .addWarning("CREATE VIEW present — expressions re-parsed under 2.x");
+        report.finish();
+
+        Map<String, Object> map = report.toMap();
+        List<Map<String, Object>> dbs = (List<Map<String, Object>>) map.get("databases");
+        Map<String, Object> first = dbs.get(0);
+
+        assertEquals("42000", first.get("sqlState"));
+        assertEquals(42001, first.get("errorCode"));
+        assertEquals("org.h2.jdbc.JdbcSQLSyntaxErrorException", first.get("errorClass"));
+        assertEquals("CREATE TABLE FOO(VALUE VARCHAR(50)", first.get("failingStatement"));
+        assertEquals("/backups/run1/bad_export.sql", first.get("preservedScriptPath"));
+        assertTrue(((List<?>) first.get("warnings")).size() == 1);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void successResult_capturesTransformations() {
+        MigrationReport report = new MigrationReport();
+        report.addResult("/db/good.mv.db", MigrationReport.Status.SUCCESS, "ok", 500)
+                .transformation("typeAliasReplacements", Map.of("DATETIME", 3, "LONGVARCHAR", 1))
+                .transformation("targetUrlFlags", List.of("MODE=LEGACY", "NON_KEYWORDS=VALUE,KEY"))
+                .transformation("smokeOpen", "OK");
+        report.finish();
+
+        String json = report.toJson();
+        assertTrue(json.contains("typeAliasReplacements"));
+        // Gson pretty-prints nested arrays; the important thing is the value round-trips
+        assertTrue(json.contains("MODE") && json.contains("LEGACY"), "got json: " + json);
+        assertTrue(json.contains("smokeOpen") && json.contains("OK"));
+
+        Map<String, Object> map = report.toMap();
+        List<Map<String, Object>> dbs = (List<Map<String, Object>>) map.get("databases");
+        Map<String, Object> t = (Map<String, Object>) dbs.get(0).get("transformations");
+        assertNotNull(t.get("typeAliasReplacements"));
+        assertNotNull(t.get("targetUrlFlags"));
+        assertEquals("OK", t.get("smokeOpen"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
     void toMap_returnsStructuredData() {
         MigrationReport report = new MigrationReport();
         report.addResult("/db/x.mv.db", MigrationReport.Status.SUCCESS, "ok", 300);

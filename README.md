@@ -247,6 +247,14 @@ H2MigrationService      ← Orchestrator
 mvn test
 ```
 
+## Troubleshooting and Support
+
+For help diagnosing and resolving migration issues:
+- **Field teams, support engineers, and customers:** See [H2 Migration Support Guide](docs/h2-migration-support-guide.md)
+- **Developers and architects:** See [Migration Failure Modes and Hardening Plan](MIGRATION_FAILURE_MODES.md)
+
+The support guide explains common errors, why they occur, how to diagnose them, and how to resolve each issue.
+
 ## Deployment Scenarios
 
 ### Important: Stop Semoss Before Migrating

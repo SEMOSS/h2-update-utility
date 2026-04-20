@@ -228,6 +228,139 @@ class ScriptRewriterTest {
         assertEquals(0, second);
     }
 
+    // --- Category B — ROW identifier quoting ---
+
+    @Test
+    void quotesBareRowIdentifierAsColumn() {
+        ScriptRewriter.RewriteResult r = ScriptRewriter.rewriteLine(
+                "CREATE TABLE T(ROW INT, NAME VARCHAR(50));");
+        assertEquals(1, r.replacements());
+        assertEquals("CREATE TABLE T(\"ROW\" INT, NAME VARCHAR(50));", r.text());
+    }
+
+    @Test
+    void doesNotQuoteRowValueConstructor() {
+        // ROW(1,2,3) — row-value constructor. Must NOT be quoted.
+        ScriptRewriter.RewriteResult r = ScriptRewriter.rewriteLine(
+                "INSERT INTO T VALUES(ROW(1,2,3));");
+        assertEquals(0, r.replacements());
+        assertEquals("INSERT INTO T VALUES(ROW(1,2,3));", r.text());
+    }
+
+    @Test
+    void doesNotQuoteRowNumberFunction() {
+        // ROW_NUMBER() — separate identifier by word boundary. Must NOT be touched.
+        ScriptRewriter.RewriteResult r = ScriptRewriter.rewriteLine(
+                "SELECT ROW_NUMBER() OVER (ORDER BY ID) FROM T;");
+        assertEquals(0, r.replacements());
+    }
+
+    @Test
+    void doesNotTouchRowInsideStringLiteral() {
+        ScriptRewriter.RewriteResult r = ScriptRewriter.rewriteLine(
+                "INSERT INTO T(NOTE) VALUES('the ROW contained NaN');");
+        assertEquals(0, r.replacements());
+    }
+
+    // --- Category C — CREATE AGGREGATE stripping ---
+
+    @Test
+    void stripsCreateAggregateSmssMedian() throws IOException {
+        Path script = tempDir.resolve("agg.sql");
+        Files.writeString(script, String.join("\n",
+                "CREATE TABLE T(ID INT);",
+                "CREATE AGGREGATE IF NOT EXISTS SMSS_MEDIAN FOR \"prerna.ds.rdbms.h2.H2MedianAggregation\";",
+                "INSERT INTO T VALUES(1);",
+                ""), StandardCharsets.UTF_8);
+
+        ScriptRewriter.RewriteReport report = ScriptRewriter.rewriteAndScanInPlace(script);
+
+        assertEquals(1, report.strippedAggregates().size());
+        assertTrue(report.strippedAggregates().get(0).contains("SMSS_MEDIAN"));
+        assertTrue(report.strippedAggregates().get(0).contains("H2MedianAggregation"));
+
+        // The rewritten script should have commented-out the CREATE AGGREGATE line
+        String rewritten = Files.readString(script, StandardCharsets.UTF_8);
+        assertTrue(rewritten.contains("-- [migration] stripped: CREATE AGGREGATE"));
+        assertTrue(rewritten.contains("CREATE TABLE T(ID INT);"));
+        assertTrue(rewritten.contains("INSERT INTO T VALUES(1);"));
+
+        // A warning is emitted
+        assertTrue(report.warnings().stream()
+                .anyMatch(w -> w.contains("SMSS_MEDIAN") && w.contains("H2MedianAggregation")));
+    }
+
+    @Test
+    void stripsUnquotedAggregateForm() throws IOException {
+        // H2 1.x also emits forms without quoted class — still must strip
+        Path script = tempDir.resolve("agg2.sql");
+        Files.writeString(script, "CREATE AGGREGATE MY_AGG FOR 'com.example.MyAgg';\n",
+                StandardCharsets.UTF_8);
+
+        ScriptRewriter.RewriteReport report = ScriptRewriter.rewriteAndScanInPlace(script);
+        assertEquals(1, report.strippedAggregates().size());
+        assertTrue(report.strippedAggregates().get(0).contains("MY_AGG"));
+    }
+
+    // --- RewriteReport structure ---
+
+    @Test
+    void rewriteReportRecordsPerTokenCounts() throws IOException {
+        Path script = tempDir.resolve("perToken.sql");
+        Files.writeString(script, String.join("\n",
+                "CREATE TABLE A(ID INT, TS DATETIME, NOTE LONGVARCHAR);",
+                "CREATE TABLE B(BODY LONGTEXT, ALT_TS DATETIME);",
+                "CREATE TABLE C(AMT NUMBER(10,2));",
+                ""), StandardCharsets.UTF_8);
+
+        ScriptRewriter.RewriteReport report = ScriptRewriter.rewriteAndScanInPlace(script);
+
+        assertEquals(5, report.totalReplacements());
+        assertEquals(Integer.valueOf(2), report.replacementsByToken().get("DATETIME"));
+        assertEquals(Integer.valueOf(1), report.replacementsByToken().get("LONGVARCHAR"));
+        assertEquals(Integer.valueOf(1), report.replacementsByToken().get("LONGTEXT"));
+        assertEquals(Integer.valueOf(1), report.replacementsByToken().get("NUMBER"));
+        // Tokens with zero counts are dropped from the report
+        assertFalse(report.replacementsByToken().containsKey("IDENTITY"));
+    }
+
+    @Test
+    void rewriteReportTracksScriptSizeAndLineCount() throws IOException {
+        Path script = tempDir.resolve("sized.sql");
+        Files.writeString(script, String.join("\n",
+                "CREATE TABLE A(ID INT);",
+                "INSERT INTO A VALUES(1);",
+                "INSERT INTO A VALUES(2);",
+                ""), StandardCharsets.UTF_8);
+
+        ScriptRewriter.RewriteReport report = ScriptRewriter.rewriteAndScanInPlace(script);
+        assertTrue(report.scriptSizeBytes() > 0);
+        assertEquals(3, report.lineCount());
+    }
+
+    @Test
+    void rewriteReportEmitsObservationWarningsForHighRiskShapes() throws IOException {
+        Path script = tempDir.resolve("obs.sql");
+        Files.writeString(script, String.join("\n",
+                "CREATE TABLE T(ID INT);",
+                "CREATE VIEW V AS SELECT * FROM T;",
+                "CREATE TRIGGER TRG BEFORE INSERT ON T FOR EACH ROW CALL \"com.example.Trg\";",
+                "CREATE ALIAS MY_FN FOR \"com.example.Fn.run\";",
+                "CREATE SEQUENCE SEQ_A START WITH 1;",
+                "SELECT GROUP_CONCAT(NAME) FROM T;",
+                "SELECT CASEWHEN(X > 0, 'pos', 'neg') FROM T;",
+                ""), StandardCharsets.UTF_8);
+
+        ScriptRewriter.RewriteReport report = ScriptRewriter.rewriteAndScanInPlace(script);
+
+        assertTrue(report.warnings().stream().anyMatch(w -> w.contains("CREATE VIEW")));
+        assertTrue(report.warnings().stream().anyMatch(w -> w.contains("CREATE TRIGGER")));
+        assertTrue(report.warnings().stream().anyMatch(w -> w.contains("CREATE ALIAS")));
+        assertTrue(report.warnings().stream().anyMatch(w -> w.contains("CREATE SEQUENCE")));
+        assertTrue(report.warnings().stream().anyMatch(w -> w.contains("GROUP_CONCAT")));
+        assertTrue(report.warnings().stream().anyMatch(w -> w.contains("CASEWHEN")));
+    }
+
     // --- Integration: rewritten script is accepted by H2 2.4.240 ---
 
     @Test
