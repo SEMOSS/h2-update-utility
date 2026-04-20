@@ -46,10 +46,6 @@ class LocalMigrationIT {
     // Helpers
     // -----------------------------------------------------------------------
 
-    private static String engineDir(String name) {
-        return name + "___" + UUID.randomUUID();
-    }
-
     private MigrationConfig localConfig(Path scanDir) {
         return new MigrationConfig(
                 MigrationConfig.MigrationMode.LOCAL,

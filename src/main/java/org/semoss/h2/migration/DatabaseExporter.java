@@ -17,7 +17,6 @@ import org.apache.logging.log4j.Logger;
 public final class DatabaseExporter {
 
     private static final Logger LOGGER = LogManager.getLogger(DatabaseExporter.class);
-    private static final String OLD_H2_VERSION = "1.4.200";
 
     private final IsolatedH2Driver driver;
 

@@ -18,7 +18,7 @@ class CloudDatabaseDiscoveryTest {
         MigrationConfig config = buildCloudConfig("s3");
         RCloneClient client = RCloneClient.fromConfig(config);
 
-        CloudDatabaseDiscovery discovery = new CloudDatabaseDiscovery(client, config, staging);
+        CloudDatabaseDiscovery discovery = new CloudDatabaseDiscovery(client, staging);
         assertEquals(staging, discovery.getStagingDir());
     }
 

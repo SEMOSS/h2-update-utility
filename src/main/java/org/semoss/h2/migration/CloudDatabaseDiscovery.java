@@ -26,17 +26,14 @@ public final class CloudDatabaseDiscovery {
     private static final Logger LOGGER = LogManager.getLogger(CloudDatabaseDiscovery.class);
 
     private final RCloneClient rclone;
-    private final MigrationConfig config;
     private final Path stagingDir;
 
     /**
      * @param rclone     configured RClone client
-     * @param config     migration config (for bucket/container info)
      * @param stagingDir local directory for downloaded cloud files
      */
-    public CloudDatabaseDiscovery(RCloneClient rclone, MigrationConfig config, Path stagingDir) {
+    public CloudDatabaseDiscovery(RCloneClient rclone, Path stagingDir) {
         this.rclone = rclone;
-        this.config = config;
         this.stagingDir = stagingDir;
     }
 
@@ -116,7 +113,7 @@ public final class CloudDatabaseDiscovery {
     }
 
     private void downloadSmssFromDir(String remotePath, String dir)
-            throws InterruptedException {
+            throws IOException, InterruptedException {
         try {
             String searchPath = remotePath + (dir.isEmpty() ? "" : "/" + dir);
             List<String> smssFiles = rclone.listFiles(searchPath, "*.smss");

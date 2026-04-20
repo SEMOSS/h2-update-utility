@@ -132,7 +132,7 @@ public class H2MigrationService {
     void migrateCloud() throws IOException, InterruptedException {
         RCloneClient rclone = RCloneClient.fromConfig(config);
         Path stagingDir = Files.createTempDirectory("h2-cloud-staging");
-        CloudDatabaseDiscovery cloudDiscovery = new CloudDatabaseDiscovery(rclone, config, stagingDir);
+        CloudDatabaseDiscovery cloudDiscovery = new CloudDatabaseDiscovery(rclone, stagingDir);
 
         String remotePath = resolveRemotePath();
         List<String> remoteFiles = cloudDiscovery.discoverRemoteDatabases(remotePath);
