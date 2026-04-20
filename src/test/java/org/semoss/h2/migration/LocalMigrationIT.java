@@ -743,6 +743,137 @@ class LocalMigrationIT {
         }
     }
 
+    // -----------------------------------------------------------------------
+    // Category A — legacy data-type aliases (DATETIME, LONGVARCHAR, NUMBER, ...)
+    // -----------------------------------------------------------------------
+
+    /**
+     * End-to-end proof that a 1.4.200 database containing Category A legacy type
+     * aliases (DATETIME, LONGVARBINARY, LONGTEXT, NUMBER) round-trips through the
+     * migration pipeline. The ScriptRewriter hop transforms any aliases still
+     * present in the SCRIPT dump to H2-2.x-recognised equivalents before RUNSCRIPT.
+     */
+    @Test
+    void categoryA_legacyTypes_migrateEndToEnd() throws Exception {
+        EngineFixture eng = createEngine("LegacyTypesEngine");
+
+        try (IsolatedH2Driver h2 = IsolatedH2Driver.load("1.4.200")) {
+            try (Connection conn = h2.connect("jdbc:h2:" + eng.dbPath, "sa", "");
+                 Statement stmt = conn.createStatement()) {
+                // All column types here are legal in H2 1.4.200 but at-risk under 2.x.
+                // H2 1.4.200 may normalise some types at storage time; the rewriter
+                // is the safety net for those that survive into the SCRIPT dump.
+                stmt.execute("""
+                    CREATE TABLE EVENTS (
+                        ID INT PRIMARY KEY,
+                        OCCURRED DATETIME,
+                        PAYLOAD LONGVARBINARY,
+                        BODY LONGTEXT,
+                        AMOUNT NUMBER(12,2),
+                        DESCRIPTION LONGVARCHAR,
+                        TINY_BLOB TINYBLOB,
+                        MEDIUM_TEXT MEDIUMTEXT
+                    )
+                """);
+                stmt.execute("INSERT INTO EVENTS VALUES "
+                        + "(1, '2024-01-15 09:30:00', X'DEADBEEF', "
+                        + "'long-form event body', 1234.56, "
+                        + "'description with a DATETIME word in it', X'01', 'medium content')");
+                stmt.execute("INSERT INTO EVENTS VALUES "
+                        + "(2, '2024-02-20 14:00:00', X'CAFEBABE', "
+                        + "'another body', 7890.12, 'another description', X'02', 'more content')");
+
+                // A column name that literally equals a legacy type token — must NOT
+                // be rewritten to a reserved type word. Verifies quoted-identifier logic.
+                stmt.execute("""
+                    CREATE TABLE KEEPERS (
+                        "DATETIME" INT PRIMARY KEY,
+                        "LONGVARCHAR" VARCHAR(50),
+                        VALUE_CONTAINING_DATETIME VARCHAR(200)
+                    )
+                """);
+                stmt.execute("INSERT INTO KEEPERS VALUES "
+                        + "(1, 'keep me', 'the DATETIME column was here')");
+            }
+        }
+
+        H2MigrationService service = new H2MigrationService(localConfig(dbDir));
+        int exitCode = service.run();
+
+        assertEquals(0, exitCode, "Migration should succeed end-to-end");
+        assertEquals(1, service.getReport().successCount());
+        assertEquals(0, service.getReport().failedCount());
+
+        try (IsolatedH2Driver h2 = IsolatedH2Driver.load("2.4.240")) {
+            try (Connection conn = h2.connect("jdbc:h2:" + eng.dbPath, "sa", "");
+                 Statement stmt = conn.createStatement()) {
+
+                try (ResultSet rs = stmt.executeQuery(
+                        "SELECT ID, OCCURRED, AMOUNT, BODY, DESCRIPTION FROM EVENTS ORDER BY ID")) {
+                    assertTrue(rs.next());
+                    assertEquals(1, rs.getInt("ID"));
+                    assertEquals(1234.56, rs.getDouble("AMOUNT"), 0.001);
+                    assertTrue(rs.getString("BODY").contains("long-form"));
+                    assertTrue(rs.getString("DESCRIPTION").contains("DATETIME word"));
+
+                    assertTrue(rs.next());
+                    assertEquals(2, rs.getInt("ID"));
+                    assertEquals(7890.12, rs.getDouble("AMOUNT"), 0.001);
+
+                    assertFalse(rs.next());
+                }
+
+                // Quoted-identifier columns named after legacy types must still be queryable by name
+                try (ResultSet rs = stmt.executeQuery(
+                        "SELECT \"DATETIME\", \"LONGVARCHAR\", VALUE_CONTAINING_DATETIME FROM KEEPERS")) {
+                    assertTrue(rs.next());
+                    assertEquals(1, rs.getInt("DATETIME"));
+                    assertEquals("keep me", rs.getString("LONGVARCHAR"));
+                    assertEquals("the DATETIME column was here", rs.getString("VALUE_CONTAINING_DATETIME"));
+                }
+
+                // Every original row survived with types intact
+                try (ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM EVENTS")) {
+                    assertTrue(rs.next());
+                    assertEquals(2, rs.getInt(1));
+                }
+            }
+        }
+    }
+
+    /**
+     * Regression test for the customer-reported {@code Unknown data type: "DATETIME"}
+     * failure. Previously, a 1.x engine DB whose schema used {@code DATETIME} columns
+     * would fail the migration outright. This test reproduces that shape and asserts
+     * the pipeline now succeeds.
+     */
+    @Test
+    void categoryA_datetimeColumn_doesNotBlockMigration() throws Exception {
+        EngineFixture eng = createEngine("DatetimeRegressionEngine");
+
+        try (IsolatedH2Driver h2 = IsolatedH2Driver.load("1.4.200")) {
+            try (Connection conn = h2.connect("jdbc:h2:" + eng.dbPath, "sa", "");
+                 Statement stmt = conn.createStatement()) {
+                stmt.execute("CREATE TABLE AUDIT_TRAIL (ID INT PRIMARY KEY, TS DATETIME, ACTION VARCHAR(100))");
+                stmt.execute("INSERT INTO AUDIT_TRAIL VALUES (1, '2024-06-01 12:00:00', 'login')");
+                stmt.execute("INSERT INTO AUDIT_TRAIL VALUES (2, '2024-06-01 12:05:00', 'query')");
+            }
+        }
+
+        H2MigrationService service = new H2MigrationService(localConfig(dbDir));
+        assertEquals(0, service.run());
+        assertEquals(1, service.getReport().successCount());
+
+        try (IsolatedH2Driver h2 = IsolatedH2Driver.load("2.4.240")) {
+            try (Connection conn = h2.connect("jdbc:h2:" + eng.dbPath, "sa", "");
+                 Statement stmt = conn.createStatement();
+                 ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM AUDIT_TRAIL")) {
+                assertTrue(rs.next());
+                assertEquals(2, rs.getInt(1));
+            }
+        }
+    }
+
     private int countRows(IsolatedH2Driver h2, String dbPath, String tableName)
             throws SQLException {
         try (Connection conn = h2.connect("jdbc:h2:" + dbPath, "sa", "");

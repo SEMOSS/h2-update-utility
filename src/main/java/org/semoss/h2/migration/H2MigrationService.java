@@ -165,13 +165,17 @@ public class H2MigrationService {
                     // Preserve export script in backup directory
                     preserveScript(script, stagingDir, config.backupDir(), runLabel);
 
+                    // Rewrite legacy type aliases (Category A) before import
+                    ScriptRewriter.rewriteInPlace(script);
+
                     importer.importDatabase(localFile, script, creds.username(), creds.password());
 
                     // Upload migrated file back
                     cloudDiscovery.uploadDatabase(remotePath, relPath, localFile);
 
-                    // Cleanup staging script (preserved copy is in backup dir)
+                    // Cleanup staging script + rewriter backup (preserved copy is in backup dir)
                     Files.deleteIfExists(script);
+                    Files.deleteIfExists(script.resolveSibling(script.getFileName().toString() + ".pre-rewrite.bak"));
 
                     report.addResult(dbId, MigrationReport.Status.SUCCESS,
                             "Migrated and uploaded", System.currentTimeMillis() - start);
@@ -223,6 +227,9 @@ public class H2MigrationService {
             // Preserve export script in backup directory
             preserveScript(script, baseDir, config.backupDir(), runLabel);
 
+            // Rewrite legacy type aliases (Category A) before import
+            ScriptRewriter.rewriteInPlace(script);
+
             // 5. Import with new H2
             try {
                 importer.importDatabase(dbFile, script, creds.username(), creds.password());
@@ -233,8 +240,9 @@ public class H2MigrationService {
                 throw e;
             }
 
-            // 6. Cleanup local export script (preserved copy is in backup dir)
+            // 6. Cleanup local export script + rewriter backup (preserved copy is in backup dir)
             Files.deleteIfExists(script);
+            Files.deleteIfExists(script.resolveSibling(script.getFileName().toString() + ".pre-rewrite.bak"));
 
             report.addResult(dbId, MigrationReport.Status.SUCCESS,
                     "Migrated from H2 " + OLD_H2 + " to " + NEW_H2,
