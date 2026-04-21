@@ -30,7 +30,7 @@ mvn clean package
 
 Produces `target/h2-migration-service.jar` — a fat JAR containing both H2 versions.
 
-## Usage
+## Usage + Testing
 
 ### Local Mode
 
