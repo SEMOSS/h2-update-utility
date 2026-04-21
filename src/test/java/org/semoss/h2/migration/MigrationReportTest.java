@@ -2,6 +2,8 @@ package org.semoss.h2.migration;
 
 import org.junit.jupiter.api.Test;
 
+import org.semoss.h2.migration.MigrationReport.Status;
+
 import java.util.List;
 import java.util.Map;
 
@@ -25,10 +27,10 @@ class MigrationReportTest {
     @Test
     void addResults_countsCorrectly() {
         MigrationReport report = new MigrationReport();
-        report.addResult("/db/a.mv.db", MigrationReport.Status.SUCCESS, "ok", 100);
-        report.addResult("/db/b.mv.db", MigrationReport.Status.FAILED, "IO error", 200);
-        report.addResult("/db/c.mv.db", MigrationReport.Status.SKIPPED, "already v2", 5);
-        report.addResult("/db/d.mv.db", MigrationReport.Status.SUCCESS, "ok", 150);
+        report.addResult("/db/a.mv.db", Status.SUCCESS, "ok", 100);
+        report.addResult("/db/b.mv.db", Status.FAILED, "IO error", 200);
+        report.addResult("/db/c.mv.db", Status.SKIPPED, "already v2", 5);
+        report.addResult("/db/d.mv.db", Status.SUCCESS, "ok", 150);
         report.finish();
 
         assertEquals(4, report.totalCount());
@@ -40,7 +42,7 @@ class MigrationReportTest {
     @Test
     void toJson_producesValidStructure() {
         MigrationReport report = new MigrationReport();
-        report.addResult("/db/test.mv.db", MigrationReport.Status.SUCCESS, "migrated", 500);
+        report.addResult("/db/test.mv.db", Status.SUCCESS, "migrated", 500);
         report.finish();
 
         String json = report.toJson();
@@ -57,7 +59,7 @@ class MigrationReportTest {
     @SuppressWarnings("unchecked")
     void failedResult_capturesSqlFailureContext() {
         MigrationReport report = new MigrationReport();
-        report.addResult("/db/bad.mv.db", MigrationReport.Status.FAILED, "syntax error", 100)
+        report.addResult("/db/bad.mv.db", Status.FAILED, "syntax error", 100)
                 .sqlState("42000")
                 .errorCode(42001)
                 .errorClass("org.h2.jdbc.JdbcSQLSyntaxErrorException")
@@ -82,7 +84,7 @@ class MigrationReportTest {
     @SuppressWarnings("unchecked")
     void successResult_capturesTransformations() {
         MigrationReport report = new MigrationReport();
-        report.addResult("/db/good.mv.db", MigrationReport.Status.SUCCESS, "ok", 500)
+        report.addResult("/db/good.mv.db", Status.SUCCESS, "ok", 500)
                 .transformation("typeAliasReplacements", Map.of("DATETIME", 3, "LONGVARCHAR", 1))
                 .transformation("targetUrlFlags", List.of("MODE=LEGACY", "NON_KEYWORDS=VALUE,KEY"))
                 .transformation("smokeOpen", "OK");
@@ -106,8 +108,8 @@ class MigrationReportTest {
     @SuppressWarnings("unchecked")
     void toMap_returnsStructuredData() {
         MigrationReport report = new MigrationReport();
-        report.addResult("/db/x.mv.db", MigrationReport.Status.SUCCESS, "ok", 300);
-        report.addResult("/db/y.mv.db", MigrationReport.Status.FAILED, "timeout", 50);
+        report.addResult("/db/x.mv.db", Status.SUCCESS, "ok", 300);
+        report.addResult("/db/y.mv.db", Status.FAILED, "timeout", 50);
         report.finish();
 
         Map<String, Object> map = report.toMap();

@@ -9,13 +9,22 @@ RUN apt-get update && apt-get install -y maven && \
 
 # Runtime stage
 FROM azul/zulu-openjdk:21-latest
-LABEL maintainer="semoss"
-LABEL description="H2 Database Migration Service (1.4.x → 2.x)"
 
-# Install rclone
+LABEL org.opencontainers.image.title="H2 Migration Service"
+LABEL org.opencontainers.image.description="Standalone migration tool for upgrading H2 databases from 1.4.x to 2.x"
+LABEL org.opencontainers.image.source="https://github.com/SEMOSS/h2-migration-service"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
+LABEL org.opencontainers.image.vendor="Semoss"
+
+# Install rclone from a pinned release (override with --build-arg RCLONE_VERSION=...)
+ARG RCLONE_VERSION=v1.71.0
 RUN apt-get update && \
-    apt-get install -y curl unzip && \
-    curl -fsSL https://rclone.org/install.sh | bash && \
+    apt-get install -y --no-install-recommends curl unzip ca-certificates && \
+    arch="$(dpkg --print-architecture)" && \
+    curl -fsSL "https://downloads.rclone.org/${RCLONE_VERSION}/rclone-${RCLONE_VERSION}-linux-${arch}.zip" -o /tmp/rclone.zip && \
+    unzip -j /tmp/rclone.zip "*/rclone" -d /usr/local/bin && \
+    chmod 755 /usr/local/bin/rclone && \
+    rm -f /tmp/rclone.zip && \
     apt-get remove -y curl unzip && \
     apt-get autoremove -y && \
     apt-get clean && rm -rf /var/lib/apt/lists/*

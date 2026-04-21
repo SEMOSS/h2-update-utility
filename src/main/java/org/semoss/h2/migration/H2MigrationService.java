@@ -13,6 +13,10 @@ import java.util.regex.Pattern;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import org.semoss.h2.migration.MigrationReport.DatabaseResult;
+import org.semoss.h2.migration.MigrationReport.Status;
+import org.semoss.h2.migration.ScriptRewriter.RewriteReport;
+
 public class H2MigrationService {
 
     private static final Logger LOGGER = LogManager.getLogger(H2MigrationService.class);
@@ -83,7 +87,7 @@ public class H2MigrationService {
             }
         } catch (Exception e) {
             LOGGER.error("Migration pipeline failed", e);
-            report.addResult("PIPELINE", MigrationReport.Status.FAILED, e.getMessage(), 0);
+            report.addResult("PIPELINE", Status.FAILED, e.getMessage(), 0);
         }
 
         report.finish();
@@ -151,11 +155,11 @@ public class H2MigrationService {
             for (String relPath : remoteFiles) {
                 long start = System.currentTimeMillis();
                 String dbId = relPath;
-                MigrationReport.DatabaseResult result = null;
+                DatabaseResult result = null;
                 try {
                     // In dry-run, skip downloading entirely — just report what was found
                     if (config.dryRun()) {
-                        report.addResult(dbId, MigrationReport.Status.SKIPPED,
+                        report.addResult(dbId, Status.SKIPPED,
                                 "Dry run - would migrate", System.currentTimeMillis() - start);
                         continue;
                     }
@@ -165,7 +169,7 @@ public class H2MigrationService {
 
                     // Encryption probe (Category H)
                     if (looksEncrypted(localFile)) {
-                        report.addResult(dbId, MigrationReport.Status.FAILED,
+                        report.addResult(dbId, Status.FAILED,
                                         "Database appears to be CIPHER-encrypted; utility does not support "
                                                 + "encrypted H2 migration — decrypt first",
                                         System.currentTimeMillis() - start)
@@ -176,7 +180,7 @@ public class H2MigrationService {
                     // Check version
                     var detection = H2VersionDetector.detect(localFile);
                     if (!detection.needsMigration()) {
-                        report.addResult(dbId, MigrationReport.Status.SKIPPED,
+                        report.addResult(dbId, Status.SKIPPED,
                                 detection.reason(), System.currentTimeMillis() - start);
                         continue;
                     }
@@ -193,12 +197,12 @@ public class H2MigrationService {
                     // Preserve export script in backup directory
                     Path preserved = preserveScript(script, stagingDir, config.backupDir(), runLabel);
 
-                    result = report.addResult(dbId, MigrationReport.Status.SUCCESS,
+                    result = report.addResult(dbId, Status.SUCCESS,
                             "pending", 0);
                     if (preserved != null) result.preservedScriptPath(preserved.toAbsolutePath().toString());
 
                     // Rewrite legacy type aliases, quote ROW, strip aggregates (Categories A/B/C)
-                    ScriptRewriter.RewriteReport rr = ScriptRewriter.rewriteAndScanInPlace(script);
+                    RewriteReport rr = ScriptRewriter.rewriteAndScanInPlace(script);
                     recordRewrite(result, rr);
 
                     // Record target-URL compatibility flags (Categories B/D/F)
@@ -208,7 +212,7 @@ public class H2MigrationService {
                         importer.importDatabase(localFile, script, creds.username(), creds.password());
                     } catch (SQLException e) {
                         recordSqlFailure(result, e);
-                        result.status(MigrationReport.Status.FAILED)
+                        result.status(Status.FAILED)
                                 .reason(e.getMessage())
                                 .durationMs(System.currentTimeMillis() - start);
                         throw e;
@@ -221,7 +225,7 @@ public class H2MigrationService {
                     } catch (SQLException e) {
                         recordSqlFailure(result, e);
                         result.transformation("smokeOpen", "FAILED");
-                        result.status(MigrationReport.Status.FAILED)
+                        result.status(Status.FAILED)
                                 .reason("Post-migration smoke open failed: " + e.getMessage())
                                 .durationMs(System.currentTimeMillis() - start);
                         throw e;
@@ -239,7 +243,7 @@ public class H2MigrationService {
                 } catch (Exception e) {
                     LOGGER.warn("Failed to migrate cloud DB: " + relPath, e);
                     if (result == null) {
-                        report.addResult(dbId, MigrationReport.Status.FAILED,
+                        report.addResult(dbId, Status.FAILED,
                                 e.getMessage(), System.currentTimeMillis() - start);
                     }
                     // otherwise already updated above
@@ -257,13 +261,13 @@ public class H2MigrationService {
                                String runLabel) {
         long start = System.currentTimeMillis();
         String dbId = dbFile.toAbsolutePath().toString();
-        MigrationReport.DatabaseResult result = null;
+        DatabaseResult result = null;
         Path backupFile = null;
 
         try {
             // Encryption probe (Category H) — do this first so we don't try to export
             if (looksEncrypted(dbFile)) {
-                report.addResult(dbId, MigrationReport.Status.FAILED,
+                report.addResult(dbId, Status.FAILED,
                                 "Database appears to be CIPHER-encrypted; utility does not support "
                                         + "encrypted H2 migration — decrypt first",
                                 System.currentTimeMillis() - start)
@@ -274,13 +278,13 @@ public class H2MigrationService {
             // 1. Version detection
             var detection = H2VersionDetector.detect(dbFile);
             if (!detection.needsMigration()) {
-                report.addResult(dbId, MigrationReport.Status.SKIPPED,
+                report.addResult(dbId, Status.SKIPPED,
                         detection.reason(), System.currentTimeMillis() - start);
                 return;
             }
 
             if (config.dryRun()) {
-                report.addResult(dbId, MigrationReport.Status.SKIPPED,
+                report.addResult(dbId, Status.SKIPPED,
                         "Dry run - would migrate (" + detection.reason() + ")",
                         System.currentTimeMillis() - start);
                 return;
@@ -300,11 +304,11 @@ public class H2MigrationService {
             Path preserved = preserveScript(script, baseDir, config.backupDir(), runLabel);
 
             // 5. Create the report entry now so every downstream step enriches the same record
-            result = report.addResult(dbId, MigrationReport.Status.SUCCESS, "pending", 0);
+            result = report.addResult(dbId, Status.SUCCESS, "pending", 0);
             if (preserved != null) result.preservedScriptPath(preserved.toAbsolutePath().toString());
 
             // 6. Rewrite (Categories A + B ROW + C aggregate strip)
-            ScriptRewriter.RewriteReport rr = ScriptRewriter.rewriteAndScanInPlace(script);
+            RewriteReport rr = ScriptRewriter.rewriteAndScanInPlace(script);
             recordRewrite(result, rr);
 
             // 7. Record compatibility flags the target URL will carry
@@ -318,7 +322,7 @@ public class H2MigrationService {
                 // Restore backup on import failure
                 LOGGER.warn("Import failed for " + dbFile + ", restoring backup", e);
                 backupMgr.restore(backupFile, dbFile);
-                result.status(MigrationReport.Status.FAILED)
+                result.status(Status.FAILED)
                         .reason(e.getMessage())
                         .durationMs(System.currentTimeMillis() - start);
                 return;
@@ -333,7 +337,7 @@ public class H2MigrationService {
                 result.transformation("smokeOpen", "FAILED");
                 LOGGER.warn("Smoke open failed for " + dbFile + ", restoring backup", e);
                 backupMgr.restore(backupFile, dbFile);
-                result.status(MigrationReport.Status.FAILED)
+                result.status(Status.FAILED)
                         .reason("Post-migration smoke open failed: " + e.getMessage())
                         .durationMs(System.currentTimeMillis() - start);
                 return;
@@ -349,10 +353,10 @@ public class H2MigrationService {
         } catch (Exception e) {
             LOGGER.warn("Failed to migrate " + dbFile, e);
             if (result == null) {
-                report.addResult(dbId, MigrationReport.Status.FAILED,
+                report.addResult(dbId, Status.FAILED,
                         e.getMessage(), System.currentTimeMillis() - start);
             } else {
-                result.status(MigrationReport.Status.FAILED)
+                result.status(Status.FAILED)
                         .reason(e.getMessage())
                         .durationMs(System.currentTimeMillis() - start);
             }
@@ -380,10 +384,10 @@ public class H2MigrationService {
     }
 
     /**
-     * Fold the rewriter's structured report into the {@link MigrationReport.DatabaseResult}
+     * Fold the rewriter's structured report into the {@link DatabaseResult}
      * so the JSON captures exactly what was mutated about the DB.
      */
-    private void recordRewrite(MigrationReport.DatabaseResult result, ScriptRewriter.RewriteReport rr) {
+    private void recordRewrite(DatabaseResult result, RewriteReport rr) {
         if (rr.totalReplacements() > 0) {
             result.transformation("typeAliasReplacements", rr.replacementsByToken());
         }
@@ -409,7 +413,7 @@ public class H2MigrationService {
      * "Syntax error in SQL statement \"…\"" fragment when present — into the result.
      * This is Category K: turning a one-line failure message into something support can act on.
      */
-    private void recordSqlFailure(MigrationReport.DatabaseResult result, SQLException e) {
+    private void recordSqlFailure(DatabaseResult result, SQLException e) {
         result.sqlState(e.getSQLState())
                 .errorCode(e.getErrorCode())
                 .errorClass(e.getClass().getName());

@@ -12,6 +12,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 
+import org.semoss.h2.migration.ScriptRewriter.RewriteReport;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -273,7 +275,7 @@ class ScriptRewriterTest {
                 "INSERT INTO T VALUES(1);",
                 ""), StandardCharsets.UTF_8);
 
-        ScriptRewriter.RewriteReport report = ScriptRewriter.rewriteAndScanInPlace(script);
+        RewriteReport report = ScriptRewriter.rewriteAndScanInPlace(script);
 
         assertEquals(1, report.strippedAggregates().size());
         assertTrue(report.strippedAggregates().get(0).contains("SMSS_MEDIAN"));
@@ -297,7 +299,7 @@ class ScriptRewriterTest {
         Files.writeString(script, "CREATE AGGREGATE MY_AGG FOR 'com.example.MyAgg';\n",
                 StandardCharsets.UTF_8);
 
-        ScriptRewriter.RewriteReport report = ScriptRewriter.rewriteAndScanInPlace(script);
+        RewriteReport report = ScriptRewriter.rewriteAndScanInPlace(script);
         assertEquals(1, report.strippedAggregates().size());
         assertTrue(report.strippedAggregates().get(0).contains("MY_AGG"));
     }
@@ -313,7 +315,7 @@ class ScriptRewriterTest {
                 "CREATE TABLE C(AMT NUMBER(10,2));",
                 ""), StandardCharsets.UTF_8);
 
-        ScriptRewriter.RewriteReport report = ScriptRewriter.rewriteAndScanInPlace(script);
+        RewriteReport report = ScriptRewriter.rewriteAndScanInPlace(script);
 
         assertEquals(5, report.totalReplacements());
         assertEquals(Integer.valueOf(2), report.replacementsByToken().get("DATETIME"));
@@ -333,7 +335,7 @@ class ScriptRewriterTest {
                 "INSERT INTO A VALUES(2);",
                 ""), StandardCharsets.UTF_8);
 
-        ScriptRewriter.RewriteReport report = ScriptRewriter.rewriteAndScanInPlace(script);
+        RewriteReport report = ScriptRewriter.rewriteAndScanInPlace(script);
         assertTrue(report.scriptSizeBytes() > 0);
         assertEquals(3, report.lineCount());
     }
@@ -351,7 +353,7 @@ class ScriptRewriterTest {
                 "SELECT CASEWHEN(X > 0, 'pos', 'neg') FROM T;",
                 ""), StandardCharsets.UTF_8);
 
-        ScriptRewriter.RewriteReport report = ScriptRewriter.rewriteAndScanInPlace(script);
+        RewriteReport report = ScriptRewriter.rewriteAndScanInPlace(script);
 
         assertTrue(report.warnings().stream().anyMatch(w -> w.contains("CREATE VIEW")));
         assertTrue(report.warnings().stream().anyMatch(w -> w.contains("CREATE TRIGGER")));

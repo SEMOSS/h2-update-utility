@@ -14,6 +14,34 @@
         Standalone migration tool for upgrading H2 databases from 1.4.x to 2.x.
         Embeds both H2 driver versions and uses classloader isolation to avoid conflicts.
     </description>
+    <url>https://github.com/SEMOSS/h2-migration-service</url>
+
+    <licenses>
+        <license>
+            <name>Apache License, Version 2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
+    <developers>
+        <developer>
+            <name>Semoss Engineering</name>
+            <organization>Semoss</organization>
+            <organizationUrl>https://github.com/SEMOSS</organizationUrl>
+        </developer>
+    </developers>
+
+    <scm>
+        <connection>scm:git:https://github.com/SEMOSS/h2-migration-service.git</connection>
+        <developerConnection>scm:git:git@github.com:SEMOSS/h2-migration-service.git</developerConnection>
+        <url>https://github.com/SEMOSS/h2-migration-service</url>
+    </scm>
+
+    <issueManagement>
+        <system>GitHub</system>
+        <url>https://github.com/SEMOSS/h2-migration-service/issues</url>
+    </issueManagement>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>

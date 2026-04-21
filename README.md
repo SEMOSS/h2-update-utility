@@ -2,7 +2,9 @@
 
 Standalone Java service that migrates H2 databases from 1.4.x to 2.x, addressing critical CVEs (CVE-2021-42392, CVE-2022-23221, CVE-2021-23463, CVE-2022-45868).
 
-Designed to run **before** upgrading Semoss to a version built against H2 2.x.
+Licensed under the [Apache License 2.0](LICENSE).
+
+Designed to run **before** upgrading [Semoss](https://github.com/SEMOSS/Semoss) to a version built against H2 2.x. The tool itself is general-purpose — any application with H2 1.4.x `.mv.db` / `.h2.db` files can use it. Companion `.smss` credential reading and the `SMSS_MEDIAN` aggregate strip are Semoss-specific optimizations and are skipped automatically when no `.smss` files are present.
 
 ## Features
 
@@ -11,7 +13,7 @@ Designed to run **before** upgrading Semoss to a version built against H2 2.x.
 - **Classloader isolation**: Loads H2 1.4.200 and 2.4.240 simultaneously via separate URLClassLoaders
 - **Automatic backups**: Backs up every database before migration with restore-on-failure
 - **SQL script preservation**: Export scripts are copied to the backup directory for post-mortem analysis
-- **SMSS credential reading**: Reads USERNAME/PASSWORD from Semoss `.smss` config files
+- **SMSS credential reading** (optional): Reads USERNAME/PASSWORD from Semoss `.smss` config files when present — safely skipped for non-Semoss users
 - **Version detection**: Skips databases already in H2 2.x format (MVStore format ≥ 2)
 - **Dry-run support**: Preview what would be migrated without changes
 - **JSON report**: Writes a migration report with per-database status, sorted by outcome
@@ -157,7 +159,7 @@ java -jar target/h2-migration-service.jar \
 java -jar target/h2-migration-service.jar \
   --mode=cloud \
   --backup-dir=/tmp/h2-backups \
-  --storage-provider=minio \
+  --semoss-storage-provider=minio \
   --minio-endpoint=http://localhost:9000 \
   --minio-region=us-east-1 \
   --minio-access-key=minioadmin \
@@ -174,7 +176,7 @@ java -jar target/h2-migration-service.jar \
   --mode=cloud \
   --backup-dir=/tmp/h2-backups \
   --search-path=db/ \
-  --storage-provider=s3 \
+  --semoss-storage-provider=s3 \
   ...
 ```
 
@@ -195,7 +197,7 @@ All CLI flags can be set via environment variables (matching Semoss conventions)
 | `DEFAULT_USER` | Fallback DB username (default: `sa`) |
 | `DEFAULT_PASSWORD` | Fallback DB password (default: empty) |
 | `SEARCH_PATH` | Subdirectory within storage root to search |
-| `SEMOSS_STORAGE_PROVIDER` | Cloud provider: `s3`, `azure_blob`, `gcs`, `minio`, `local_file_system` |
+| `SEMOSS_STORAGE_PROVIDER` | Cloud provider: `s3`, `azure` (also accepts `azure_blob`), `gcs`, `minio`, `local_file_system` |
 | `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY` | AWS S3 config |
 | `AZ_ACCOUNT_NAME`, `AZ_PRIMARY_KEY`, `AZ_CONN_STRING` | Azure config |
 | `AZ_USE_MSI`, `AZ_GENERATE_DYNAMIC_SAS` | Azure auth flags (`true`/`false`) |
@@ -208,19 +210,19 @@ All CLI flags can be set via environment variables (matching Semoss conventions)
 
 ```bash
 # Build locally
-docker build -t h2-migration-service:1.0.0 .
+docker build -t h2-migration-service:latest .
 
 # TODO: instructions to pull from Docker Hub
 
 # Run local mode
 docker run -v /path/to/db:/data -v /path/to/backups:/backup \
-  h2-migration-service:1.0.0 --mode=local --db-dir=/data --backup-dir=/backup
+  h2-migration-service:latest --mode=local --db-dir=/data --backup-dir=/backup
 
 # Run cloud mode
 docker run -e SEMOSS_STORAGE_PROVIDER=s3 \
   -e S3_REGION=us-east-1 -e S3_BUCKET=mybucket \
   -e S3_ACCESS_KEY=AKID -e S3_SECRET_KEY=SECRET \
-  h2-migration-service:1.0.0 --mode=cloud --backup-dir=/backup
+  h2-migration-service:latest --mode=cloud --backup-dir=/backup
 ```
 
 ## Architecture
@@ -249,11 +251,7 @@ mvn test
 
 ## Troubleshooting and Support
 
-For help diagnosing and resolving migration issues:
-- **Field teams, support engineers, and customers:** See [H2 Migration Support Guide](docs/h2-migration-support-guide.md)
-- **Developers and architects:** See [Migration Failure Modes and Hardening Plan](MIGRATION_FAILURE_MODES.md)
-
-The support guide explains common errors, why they occur, how to diagnose them, and how to resolve each issue.
+For help diagnosing and resolving migration issues, see the [H2 Migration Support Guide](docs/h2-migration-support-guide.md). It explains common errors, why they occur, how to diagnose them, and how to resolve each issue.
 
 ## Deployment Scenarios
 
@@ -308,7 +306,7 @@ This means cloud migration requires **two steps**:
    java -jar h2-migration-service.jar \
      --mode=cloud \
      --backup-dir=/tmp/h2-backups \
-     --storage-provider=s3 \
+     --semoss-storage-provider=s3 \
      --s3-region=us-east-1 \
      --s3-bucket=my-semoss-bucket \
      --s3-access-key=AKID \

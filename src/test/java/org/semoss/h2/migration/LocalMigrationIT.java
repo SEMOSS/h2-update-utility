@@ -4,6 +4,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import org.semoss.h2.migration.ScriptRewriter.RewriteReport;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -1098,7 +1100,7 @@ class LocalMigrationIT {
             Files.writeString(script, content);
 
             // 4. Run the rewriter — it should strip the aggregate
-            ScriptRewriter.RewriteReport rr = ScriptRewriter.rewriteAndScanInPlace(script);
+            RewriteReport rr = ScriptRewriter.rewriteAndScanInPlace(script);
             assertTrue(rr.strippedAggregates().stream().anyMatch(s -> s.contains("SMSS_MEDIAN")),
                     "SMSS_MEDIAN should be stripped — got " + rr.strippedAggregates());
 
