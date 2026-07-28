@@ -56,6 +56,12 @@ public final class BackupManager {
      * @throws IOException if the copy fails
      */
     public void restore(Path backupFile, Path originalFile) throws IOException {
+        String originalName = originalFile.getFileName().toString();
+        if (originalName.endsWith(DatabaseDiscovery.H2_DB_SUFFIX)) {
+            String baseName = originalName.substring(
+                    0, originalName.length() - DatabaseDiscovery.H2_DB_SUFFIX.length());
+            Files.deleteIfExists(originalFile.resolveSibling(baseName + DatabaseDiscovery.MV_DB_SUFFIX));
+        }
         Files.copy(backupFile, originalFile, StandardCopyOption.REPLACE_EXISTING);
         LOGGER.info("Restored " + backupFile + " -> " + originalFile);
     }

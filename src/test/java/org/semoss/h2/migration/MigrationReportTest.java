@@ -6,6 +6,7 @@ import org.semoss.h2.migration.MigrationReport.Status;
 
 import java.util.List;
 import java.util.Map;
+import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -127,6 +128,30 @@ class MigrationReportTest {
         // Sorted by status alphabetically: FAILED before SUCCESS
         assertEquals("FAILED", databases.get(0).get("status"));
         assertEquals("/db/x.mv.db", databases.get(1).get("path"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void targetResultIncludesClassificationWithoutCredentials() {
+        DatabaseTarget target = DatabaseTarget.discovered(
+                        Path.of("/project/App/app_root/version/id/H2_Store_A.mv.db"),
+                        DatabaseTarget.TargetType.PERSISTED_INSIGHT_FRAME_H2,
+                        DatabaseTarget.Disposition.MIGRATE,
+                        DatabaseTarget.RuntimeProfile.H2_FRAME)
+                .resolved(DatabaseTarget.CredentialSource.H2_FRAME_RUNTIME,
+                        new SmssCredentialReader.Credentials("sa", "secret-not-for-report"),
+                        null, "H2", "jdbc:h2:nio:/secret/path", List.of());
+
+        MigrationReport report = new MigrationReport();
+        report.addResult(target, Status.SKIPPED, "dry run", 1);
+
+        Map<String, Object> first = ((List<Map<String, Object>>) report.toMap().get("databases")).get(0);
+        assertEquals("PERSISTED_INSIGHT_FRAME_H2", first.get("targetType"));
+        assertEquals("H2_FRAME_RUNTIME", first.get("credentialSource"));
+        assertEquals("H2_FRAME", first.get("runtimeProfile"));
+        String json = report.toJson();
+        assertTrue(!json.contains("secret-not-for-report"));
+        assertTrue(!json.contains("jdbc:h2:nio:/secret/path"));
     }
 
 }

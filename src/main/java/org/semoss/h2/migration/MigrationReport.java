@@ -53,6 +53,14 @@ public final class MigrationReport {
         private String reason;
         private long durationMs;
 
+        // SEMOSS target identity (never contains passwords or secret URL values)
+        private String targetType;
+        private String disposition;
+        private String credentialSource;
+        private String runtimeProfile;
+        private String companionSmssPath;
+        private String companionBackend;
+
         // Category K — detailed error context
         private String sqlState;
         private Integer errorCode;
@@ -82,6 +90,12 @@ public final class MigrationReport {
         public String errorClass() { return errorClass; }
         public String failingStatement() { return failingStatement; }
         public String preservedScriptPath() { return preservedScriptPath; }
+        public String targetType() { return targetType; }
+        public String disposition() { return disposition; }
+        public String credentialSource() { return credentialSource; }
+        public String runtimeProfile() { return runtimeProfile; }
+        public String companionSmssPath() { return companionSmssPath; }
+        public String companionBackend() { return companionBackend; }
         public List<String> warnings() { return Collections.unmodifiableList(warnings); }
         public Map<String, Object> transformations() { return Collections.unmodifiableMap(transformations); }
 
@@ -93,6 +107,17 @@ public final class MigrationReport {
         public DatabaseResult errorClass(String c) { this.errorClass = c; return this; }
         public DatabaseResult failingStatement(String s) { this.failingStatement = s; return this; }
         public DatabaseResult preservedScriptPath(String p) { this.preservedScriptPath = p; return this; }
+        public DatabaseResult target(DatabaseTarget target) {
+            this.targetType = target.targetType().name();
+            this.disposition = target.disposition().name();
+            this.credentialSource = target.credentialSource().name();
+            this.runtimeProfile = target.runtimeProfile().name();
+            this.companionSmssPath = target.companionSmss() == null
+                    ? null : target.companionSmss().toAbsolutePath().toString();
+            this.companionBackend = target.companionBackend();
+            for (String warning : target.warnings()) addWarning(warning);
+            return this;
+        }
         public DatabaseResult addWarning(String w) { warnings.add(w); return this; }
         public DatabaseResult transformation(String key, Object value) { transformations.put(key, value); return this; }
     }
@@ -113,6 +138,11 @@ public final class MigrationReport {
         DatabaseResult r = new DatabaseResult(path, status, reason, durationMs);
         results.add(r);
         return r;
+    }
+
+    public DatabaseResult addResult(DatabaseTarget target, Status status, String reason, long durationMs) {
+        return addResult(target.databaseFile().toAbsolutePath().toString(), status, reason, durationMs)
+                .target(target);
     }
 
     public void finish() {
@@ -153,6 +183,12 @@ public final class MigrationReport {
             entry.put("status", r.status.name());
             entry.put("reason", r.reason);
             entry.put("durationMs", r.durationMs);
+            if (r.targetType != null) entry.put("targetType", r.targetType);
+            if (r.disposition != null) entry.put("disposition", r.disposition);
+            if (r.credentialSource != null) entry.put("credentialSource", r.credentialSource);
+            if (r.runtimeProfile != null) entry.put("runtimeProfile", r.runtimeProfile);
+            if (r.companionSmssPath != null) entry.put("companionSmssPath", r.companionSmssPath);
+            if (r.companionBackend != null) entry.put("companionBackend", r.companionBackend);
             if (r.preservedScriptPath != null) entry.put("preservedScriptPath", r.preservedScriptPath);
             if (r.sqlState != null) entry.put("sqlState", r.sqlState);
             if (r.errorCode != null) entry.put("errorCode", r.errorCode);

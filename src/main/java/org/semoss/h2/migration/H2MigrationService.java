@@ -111,10 +111,10 @@ public class H2MigrationService {
      * Migrate all H2 databases found on the local filesystem.
      */
     void migrateLocal() throws IOException {
-        List<Path> databases = DatabaseDiscovery.findDatabases(config.dbDir());
-        LOGGER.info("Found " + databases.size() + " H2 database files locally");
+        List<DatabaseTarget> targets = DatabaseDiscovery.findTargets(config.dbDir());
+        LOGGER.info("Found " + targets.size() + " classified H2 database candidates locally");
 
-        if (databases.isEmpty()) return;
+        if (targets.isEmpty()) return;
 
         try (IsolatedH2Driver oldDriver = IsolatedH2Driver.load(OLD_H2);
              IsolatedH2Driver newDriver = IsolatedH2Driver.load(NEW_H2)) {
@@ -124,8 +124,9 @@ public class H2MigrationService {
             DatabaseImporter importer = new DatabaseImporter(newDriver);
             String runLabel = BackupManager.generateRunLabel();
 
-            for (Path dbFile : databases) {
-                migrateSingleDatabase(dbFile, config.dbDir(), backupMgr, exporter, importer, runLabel);
+            for (DatabaseTarget discovered : targets) {
+                DatabaseTarget resolved = DatabaseCredentialResolver.resolve(discovered, config);
+                migrateSingleTarget(resolved, config.dbDir(), backupMgr, exporter, importer, runLabel);
             }
         }
     }
@@ -256,18 +257,40 @@ public class H2MigrationService {
      * Migrate a single local database file: detect → backup → export → rewrite → import
      * → smoke open → cleanup.
      */
-    void migrateSingleDatabase(Path dbFile, Path baseDir, BackupManager backupMgr,
-                               DatabaseExporter exporter, DatabaseImporter importer,
-                               String runLabel) {
+    void migrateSingleTarget(DatabaseTarget target, Path baseDir, BackupManager backupMgr,
+                             DatabaseExporter exporter, DatabaseImporter importer,
+                             String runLabel) {
         long start = System.currentTimeMillis();
-        String dbId = dbFile.toAbsolutePath().toString();
+        Path dbFile = target.databaseFile();
         DatabaseResult result = null;
         Path backupFile = null;
+        Path smssBackupFile = null;
+        SmssUrlUpdater.UpdatePlan smssUpdate = null;
+        boolean migrationSucceeded = false;
+        String stage = "preflight";
 
         try {
-            // Encryption probe (Category H) — do this first so we don't try to export
+            if (target.disposition() == DatabaseTarget.Disposition.SKIP) {
+                String reason = target.resolutionError() == null
+                        ? "Transient live InsightCache database; runtime will recreate it"
+                        : target.resolutionError();
+                report.addResult(target, Status.SKIPPED,
+                        reason,
+                        System.currentTimeMillis() - start);
+                return;
+            }
+
+            if (target.disposition() == DatabaseTarget.Disposition.MANUAL_REVIEW
+                    || target.resolutionError() != null || !target.readyToMigrate()) {
+                String reason = target.resolutionError() == null
+                        ? "Target is not resolved for migration" : target.resolutionError();
+                report.addResult(target, Status.FAILED, reason,
+                        System.currentTimeMillis() - start);
+                return;
+            }
+
             if (looksEncrypted(dbFile)) {
-                report.addResult(dbId, Status.FAILED,
+                report.addResult(target, Status.FAILED,
                                 "Database appears to be CIPHER-encrypted; utility does not support "
                                         + "encrypted H2 migration — decrypt first",
                                 System.currentTimeMillis() - start)
@@ -278,89 +301,124 @@ public class H2MigrationService {
             // 1. Version detection
             var detection = H2VersionDetector.detect(dbFile);
             if (!detection.needsMigration()) {
-                report.addResult(dbId, Status.SKIPPED,
+                report.addResult(target, Status.SKIPPED,
                         detection.reason(), System.currentTimeMillis() - start);
                 return;
             }
 
             if (config.dryRun()) {
-                report.addResult(dbId, Status.SKIPPED,
+                report.addResult(target, Status.SKIPPED,
                         "Dry run - would migrate (" + detection.reason() + ")",
                         System.currentTimeMillis() - start);
                 return;
             }
 
-            // 2. Backup
+            result = report.addResult(target, Status.SUCCESS, "pending", 0);
+
+            stage = "backup";
             backupFile = backupMgr.backup(dbFile, baseDir, runLabel);
 
-            // 3. Read credentials from companion SMSS
-            SmssCredentialReader.Credentials creds = SmssCredentialReader.readCredentials(
-                    dbFile, config.defaultUsername(), config.defaultPassword());
+            if (target.companionSmss() != null && "H2".equals(target.companionBackend())) {
+                smssUpdate = SmssUrlUpdater.preview(target.companionSmss());
+                if (smssUpdate.required()) {
+                    stage = "SMSS backup";
+                    smssBackupFile = backupMgr.backup(target.companionSmss(), baseDir, runLabel);
+                    result.transformation("smssUrlRemovedSettings", smssUpdate.removedSettings());
+                }
+            }
 
-            // 4. Export with old H2
-            Path script = exporter.export(dbFile, creds.username(), creds.password());
+            SmssCredentialReader.Credentials creds = target.credentials();
 
-            // Preserve export script in backup directory
-            Path preserved = preserveScript(script, baseDir, config.backupDir(), runLabel);
+            stage = "export";
+            Path scriptPath = exportScriptPath(dbFile, baseDir, config.backupDir(), runLabel);
+            Path script = exporter.export(dbFile, scriptPath, creds.username(), creds.password());
+            result.preservedScriptPath(script.toAbsolutePath().toString());
 
-            // 5. Create the report entry now so every downstream step enriches the same record
-            result = report.addResult(dbId, Status.SUCCESS, "pending", 0);
-            if (preserved != null) result.preservedScriptPath(preserved.toAbsolutePath().toString());
-
-            // 6. Rewrite (Categories A + B ROW + C aggregate strip)
+            stage = "rewrite";
             RewriteReport rr = ScriptRewriter.rewriteAndScanInPlace(script);
             recordRewrite(result, rr);
 
-            // 7. Record compatibility flags the target URL will carry
             result.transformation("targetUrlFlags", DatabaseImporter.targetUrlFlags());
 
-            // 8. Import with new H2
-            try {
-                importer.importDatabase(dbFile, script, creds.username(), creds.password());
-            } catch (SQLException e) {
-                recordSqlFailure(result, e);
-                // Restore backup on import failure
-                LOGGER.warn("Import failed for " + dbFile + ", restoring backup", e);
-                backupMgr.restore(backupFile, dbFile);
-                result.status(Status.FAILED)
-                        .reason(e.getMessage())
-                        .durationMs(System.currentTimeMillis() - start);
-                return;
+            stage = "import";
+            importer.importDatabase(dbFile, script, creds.username(), creds.password());
+
+            stage = "generic smoke open";
+            importer.smokeOpen(dbFile, creds.username(), creds.password());
+            result.transformation("smokeOpen", "OK");
+
+            if (smssUpdate != null && smssUpdate.required()) {
+                stage = "SMSS URL update";
+                SmssUrlUpdater.apply(smssUpdate);
+                result.transformation("smssUrlUpdate", "OK");
             }
 
-            // 9. Post-migration smoke open (Category I)
-            try {
-                importer.smokeOpen(dbFile, creds.username(), creds.password());
-                result.transformation("smokeOpen", "OK");
-            } catch (SQLException e) {
-                recordSqlFailure(result, e);
-                result.transformation("smokeOpen", "FAILED");
-                LOGGER.warn("Smoke open failed for " + dbFile + ", restoring backup", e);
-                backupMgr.restore(backupFile, dbFile);
-                result.status(Status.FAILED)
-                        .reason("Post-migration smoke open failed: " + e.getMessage())
-                        .durationMs(System.currentTimeMillis() - start);
-                return;
-            }
-
-            // 10. Cleanup local export script + rewriter backup (preserved copy is in backup dir)
-            Files.deleteIfExists(script);
-            Files.deleteIfExists(script.resolveSibling(script.getFileName().toString() + ".pre-rewrite.bak"));
+            stage = "runtime profile smoke open";
+            importer.smokeOpenRuntime(target);
+            result.transformation("runtimeSmokeOpen", "OK");
 
             result.reason("Migrated from H2 " + OLD_H2 + " to " + NEW_H2)
                     .durationMs(System.currentTimeMillis() - start);
+            migrationSucceeded = true;
 
         } catch (Exception e) {
             LOGGER.warn("Failed to migrate " + dbFile, e);
             if (result == null) {
-                report.addResult(dbId, Status.FAILED,
-                        e.getMessage(), System.currentTimeMillis() - start);
+                result = report.addResult(target, Status.FAILED,
+                        stage + " failed: " + e.getMessage(), System.currentTimeMillis() - start);
             } else {
+                if (e instanceof SQLException sqlException) recordSqlFailure(result, sqlException);
+                if (stage.contains("smoke open")) {
+                    result.transformation(stage.startsWith("runtime")
+                            ? "runtimeSmokeOpen" : "smokeOpen", "FAILED");
+                }
                 result.status(Status.FAILED)
-                        .reason(e.getMessage())
+                        .reason(stage + " failed: " + e.getMessage())
                         .durationMs(System.currentTimeMillis() - start);
             }
+        } finally {
+            if (backupFile != null && !migrationSucceeded) {
+                try {
+                    backupMgr.restore(backupFile, dbFile);
+                    if (result != null) result.transformation("restore", "OK");
+                } catch (IOException restoreError) {
+                    LOGGER.error("Failed to restore backup for " + dbFile, restoreError);
+                    if (result != null) {
+                        result.addWarning("Backup restore failed: " + restoreError.getMessage())
+                                .transformation("restore", "FAILED");
+                    }
+                }
+            }
+            if (smssBackupFile != null && !migrationSucceeded) {
+                try {
+                    backupMgr.restore(smssBackupFile, target.companionSmss());
+                    if (result != null) result.transformation("smssRestore", "OK");
+                } catch (IOException restoreError) {
+                    LOGGER.error("Failed to restore SMSS backup for " + target.companionSmss(), restoreError);
+                    if (result != null) {
+                        result.addWarning("SMSS backup restore failed: " + restoreError.getMessage())
+                                .transformation("smssRestore", "FAILED");
+                    }
+                }
+            }
         }
+    }
+
+    private Path exportScriptPath(Path dbFile, Path baseDir, Path backupDir, String runLabel) {
+        Path relative;
+        try {
+            relative = baseDir.toAbsolutePath().normalize().relativize(dbFile.toAbsolutePath().normalize());
+        } catch (IllegalArgumentException e) {
+            relative = dbFile.getFileName();
+        }
+        String name = relative.getFileName().toString();
+        if (name.endsWith(DatabaseDiscovery.MV_DB_SUFFIX)) {
+            name = name.substring(0, name.length() - DatabaseDiscovery.MV_DB_SUFFIX.length());
+        } else if (name.endsWith(DatabaseDiscovery.H2_DB_SUFFIX)) {
+            name = name.substring(0, name.length() - DatabaseDiscovery.H2_DB_SUFFIX.length());
+        }
+        Path relativeScript = relative.resolveSibling(name + "_export.sql");
+        return backupDir.resolve(runLabel).resolve("scripts").resolve(relativeScript);
     }
 
     /**

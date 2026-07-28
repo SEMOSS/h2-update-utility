@@ -7,6 +7,7 @@ import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 import org.apache.logging.log4j.LogManager;
@@ -36,6 +37,17 @@ public final class DatabaseDiscovery {
      * @throws IllegalArgumentException if rootDir is null or not a directory
      */
     public static List<Path> findDatabases(Path rootDir) throws IOException {
+        return findTargets(rootDir).stream()
+                .map(DatabaseTarget::databaseFile)
+                .toList();
+    }
+
+    /**
+     * Discover and classify every H2 file under the supplied SEMOSS root.
+     * Classification is performed before credentials are considered so
+     * generated databases cannot accidentally inherit an unrelated SMSS.
+     */
+    public static List<DatabaseTarget> findTargets(Path rootDir) throws IOException {
         if (rootDir == null) {
             throw new IllegalArgumentException("rootDir must not be null");
         }
@@ -44,13 +56,13 @@ public final class DatabaseDiscovery {
             throw new IllegalArgumentException("Not a directory: " + normalized);
         }
 
-        List<Path> results = new ArrayList<>();
+        List<DatabaseTarget> results = new ArrayList<>();
 
         Files.walkFileTree(normalized, new SimpleFileVisitor<>() {
             @Override
             public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
                 if (isH2Database(file)) {
-                    results.add(file.toAbsolutePath().normalize());
+                    results.add(DatabaseClassifier.classify(normalized, file));
                 }
                 return FileVisitResult.CONTINUE;
             }
@@ -62,7 +74,9 @@ public final class DatabaseDiscovery {
             }
         });
 
-        LOGGER.info("Discovered " + results.size() + " H2 database(s) under " + normalized);
+        results.sort(Comparator.comparing(target -> target.databaseFile().toString()));
+        LOGGER.info("Discovered and classified " + results.size()
+                + " H2 database candidate(s) under " + normalized);
         return results;
     }
 

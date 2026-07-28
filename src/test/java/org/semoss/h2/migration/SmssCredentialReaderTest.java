@@ -141,4 +141,46 @@ class SmssCredentialReaderTest {
 
         assertNull(SmssCredentialReader.findSmssFile(dbFile));
     }
+
+    @Test
+    void readMetadata_confirmsH2AndPreservesExplicitBlankPassword() throws IOException {
+        Path smss = tempDir.resolve("h2.smss");
+        Files.writeString(smss, """
+                RDBMS_TYPE\tH2_DB
+                DRIVER\torg.h2.Driver
+                USERNAME\tsa
+                PASSWORD
+                CONNECTION_URL\tjdbc:h2:nio:/data/database
+                """);
+
+        var metadata = SmssCredentialReader.readMetadata(smss, "fallback", "fallback-password");
+
+        assertEquals("H2", metadata.backend());
+        assertEquals(true, metadata.confirmedH2());
+        assertEquals("sa", metadata.credentials().username());
+        assertEquals("", metadata.credentials().password());
+    }
+
+    @Test
+    void readMetadata_rejectsConflictingBackendIndicators() throws IOException {
+        Path smss = tempDir.resolve("conflict.smss");
+        Files.writeString(smss, """
+                RDBMS_TYPE\tPOSTGRES
+                DRIVER\torg.h2.Driver
+                CONNECTION_URL\tjdbc:postgresql://localhost/postgres
+                """);
+
+        var metadata = SmssCredentialReader.readMetadata(smss, "sa", "");
+
+        assertEquals(false, metadata.confirmedH2());
+        assertEquals(true, metadata.backend().startsWith("CONFLICTING:"));
+    }
+
+    @Test
+    void credentialsToStringRedactsPassword() {
+        var credentials = new SmssCredentialReader.Credentials("admin", "super-secret");
+
+        assertEquals(false, credentials.toString().contains("super-secret"));
+        assertEquals(true, credentials.toString().contains("<redacted>"));
+    }
 }

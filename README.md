@@ -4,7 +4,10 @@ Standalone Java service that migrates H2 databases from 1.4.x to 2.x, addressing
 
 Licensed under the [Apache License 2.0](LICENSE).
 
-Designed to run **before** upgrading [Semoss](https://github.com/SEMOSS/Semoss) to a version built against H2 2.x. The tool itself is general-purpose — any application with H2 1.4.x `.mv.db` / `.h2.db` files can use it. Companion `.smss` credential reading and the `SMSS_MEDIAN` aggregate strip are Semoss-specific optimizations and are skipped automatically when no `.smss` files are present.
+Designed to run **before** upgrading [Semoss](https://github.com/SEMOSS/Semoss)
+to a version built against H2 2.x. Local migration is intentionally aware of
+the SEMOSS `db/`, `project/`, and `InsightCache/` layouts. Files outside a known
+SEMOSS target class fail closed instead of being opened with guessed credentials.
 
 ## Features
 
@@ -13,7 +16,18 @@ Designed to run **before** upgrading [Semoss](https://github.com/SEMOSS/Semoss) 
 - **Classloader isolation**: Loads H2 1.4.200 and 2.4.240 simultaneously via separate URLClassLoaders
 - **Automatic backups**: Backs up every database before migration with restore-on-failure
 - **SQL script preservation**: Export scripts are copied to the backup directory for post-mortem analysis
-- **SMSS credential reading** (optional): Reads USERNAME/PASSWORD from Semoss `.smss` config files when present — safely skipped for non-Semoss users
+- **SMSS credential validation**: Reads primary-database credentials only from a
+  profile whose type, driver, or URL confirms that it is H2
+- **SEMOSS target classification**: Distinguishes system stores, user engines,
+  generated audit/insight databases, persisted insight-frame stores, and live
+  `InsightCache` files before credentials are selected
+- **Generated database profiles**: Uses the SEMOSS runtime `sa`/empty profile for
+  audit, project-insight, and saved `H2_Store_*.mv.db` frame databases instead of
+  borrowing a neighboring project/engine `.smss`
+- **Backend-aware primary handling**: User-engine files require a confirmed H2
+  `.smss`; base system files whose active `.smss` is confirmed PostgreSQL or
+  SQLite are reported and intentionally skipped. Non-H2 credentials are never
+  used to open a physical H2 file
 - **Version detection**: Skips databases already in H2 2.x format (MVStore format ≥ 2)
 - **Dry-run support**: Preview what would be migrated without changes
 - **JSON report**: Writes a migration report with per-database status, sorted by outcome
@@ -42,6 +56,29 @@ java -jar target/h2-migration-service.jar \
   --db-dir=/path/to/semoss/db \
   --backup-dir=/path/to/backups
 ```
+
+Run local SEMOSS homes as two maintenance passes while every SEMOSS process is
+stopped:
+
+```bash
+# System stores, user engines, and per-engine audit databases
+java -jar target/h2-migration-service.jar \
+  --mode=local --db-dir=/path/to/semoss/db --backup-dir=/path/to/backups/db
+
+# Project insight metadata and persisted saved-insight H2 frames
+java -jar target/h2-migration-service.jar \
+  --mode=local --db-dir=/path/to/semoss/project --backup-dir=/path/to/backups/project
+```
+
+`InsightCache/**` databases are reported as `SKIPPED`. Saved
+`project/*/app_root/version/*/H2_Store_*.mv.db` files remain migration targets.
+Unknown locations or primary databases without a confirmed H2 `.smss` are
+reported as failures and produce a nonzero exit code, including during dry-run.
+For confirmed H2 profiles, the utility removes the known H2 1.x-only
+`EARLY_FILTER`, `QUERY_CACHE_SIZE`, `LOG`, and `UNDO_LOG` settings from the
+persisted `.smss` after a successful database import. The `.smss` is backed up
+first and restored with the database if the update or runtime-open validation
+fails. Dry-run reports the planned settings removal without editing the file.
 
 ### Cloud Mode (S3)
 
@@ -183,6 +220,11 @@ java -jar target/h2-migration-service.jar \
 ### Dry Run
 
 Add `--dry-run` to any command to preview without modifying files.
+
+The JSON report includes each database's `targetType`, `disposition`,
+`credentialSource`, `runtimeProfile`, companion SMSS/backend when applicable,
+and configuration warnings. Passwords and concrete runtime URLs are never
+written to the report.
 
 ### Environment Variables
 

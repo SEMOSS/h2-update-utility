@@ -10,6 +10,7 @@ import java.sql.ResultSet;
 import java.sql.Statement;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class H2MigrationServiceTest {
@@ -34,6 +35,7 @@ class H2MigrationServiceTest {
         }
 
         assertTrue(Files.exists(Path.of(dbName + ".mv.db")));
+        writeH2Smss(dbDir.resolve("testdb.smss"), "sa", "");
 
         // Run migration
         MigrationConfig config = new MigrationConfig(
@@ -69,7 +71,7 @@ class H2MigrationServiceTest {
 
     @Test
     void run_localMode_multipleDatabases() throws Exception {
-        Path dbDir = tempDir.resolve("multi");
+        Path dbDir = tempDir.resolve("db");
         Path sub1 = dbDir.resolve("engine1");
         Path sub2 = dbDir.resolve("engine2");
         Files.createDirectories(sub1);
@@ -85,6 +87,8 @@ class H2MigrationServiceTest {
                 }
             }
         }
+        writeH2Smss(dbDir.resolve("engine1.smss"), "sa", "");
+        writeH2Smss(dbDir.resolve("engine2.smss"), "sa", "");
 
         MigrationConfig config = new MigrationConfig(
                 MigrationConfig.MigrationMode.LOCAL,
@@ -108,7 +112,7 @@ class H2MigrationServiceTest {
 
     @Test
     void run_dryRun_doesNotModifyDatabase() throws Exception {
-        Path dbDir = tempDir.resolve("dry");
+        Path dbDir = tempDir.resolve("db");
         Files.createDirectories(dbDir);
         String dbName = dbDir.resolve("drydb").toAbsolutePath().toString();
 
@@ -120,6 +124,7 @@ class H2MigrationServiceTest {
         }
 
         Path dbFile = Path.of(dbName + ".mv.db");
+        writeH2Smss(dbDir.resolve("drydb.smss"), "sa", "");
         long sizeBefore = Files.size(dbFile);
 
         MigrationConfig config = new MigrationConfig(
@@ -146,7 +151,7 @@ class H2MigrationServiceTest {
 
     @Test
     void run_backupsCreated() throws Exception {
-        Path dbDir = tempDir.resolve("bktest");
+        Path dbDir = tempDir.resolve("db");
         Files.createDirectories(dbDir);
         String dbName = dbDir.resolve("bkdb").toAbsolutePath().toString();
 
@@ -158,6 +163,7 @@ class H2MigrationServiceTest {
         }
 
         Path backupDir = tempDir.resolve("backups-bk");
+        writeH2Smss(dbDir.resolve("bkdb.smss"), "sa", "");
         MigrationConfig config = new MigrationConfig(
                 MigrationConfig.MigrationMode.LOCAL,
                 dbDir,
@@ -225,7 +231,7 @@ class H2MigrationServiceTest {
     void run_localMode_failedMigration_capturesErrorContext() throws Exception {
         // A hand-crafted export script whose DDL is invalid under H2 2.x even after MODE=LEGACY
         // forces the failure path. We then assert Category K enrichment populated the result.
-        Path dbDir = tempDir.resolve("fail");
+        Path dbDir = tempDir.resolve("db");
         Files.createDirectories(dbDir);
         String dbName = dbDir.resolve("fail").toAbsolutePath().toString();
 
@@ -251,6 +257,7 @@ class H2MigrationServiceTest {
                 "",
                 "rclone", "", ""
         );
+        writeH2Smss(dbDir.resolve("fail.smss"), "sa", "");
 
         H2MigrationService service = new H2MigrationService(config);
         service.run();
@@ -265,7 +272,7 @@ class H2MigrationServiceTest {
 
     @Test
     void run_withSmssCredentials() throws Exception {
-        Path dbDir = tempDir.resolve("smss");
+        Path dbDir = tempDir.resolve("db");
         Path engineDir = dbDir.resolve("myEngine");
         Files.createDirectories(engineDir);
 
@@ -281,7 +288,14 @@ class H2MigrationServiceTest {
 
         // Write SMSS file
         Path smssFile = dbDir.resolve("myEngine.smss");
-        Files.writeString(smssFile, "ENGINE\tmyEngine\nUSERNAME\tadmin\nPASSWORD\tpwd123\n");
+        Files.writeString(smssFile, """
+                ENGINE\tmyEngine
+                RDBMS_TYPE\tH2_DB
+                DRIVER\torg.h2.Driver
+                USERNAME\tadmin
+                PASSWORD\tpwd123
+                CONNECTION_URL\tjdbc:h2:nio:/ignored/myEngine
+                """);
 
         MigrationConfig config = new MigrationConfig(
                 MigrationConfig.MigrationMode.LOCAL,
@@ -311,5 +325,260 @@ class H2MigrationServiceTest {
                 assertEquals("secret_data", rs.getString(1));
             }
         }
+    }
+
+    @Test
+    void run_updatesLegacyH2SettingsInSmssAfterSuccessfulMigration() throws Exception {
+        Path dbRoot = tempDir.resolve("db");
+        Path engine = dbRoot.resolve("LegacyEngine__id");
+        Files.createDirectories(engine);
+        String dbName = engine.resolve("database").toAbsolutePath().toString();
+        try (IsolatedH2Driver oldH2 = IsolatedH2Driver.load("1.4.200");
+             Connection conn = oldH2.connect("jdbc:h2:" + dbName, "sa", "");
+             Statement stmt = conn.createStatement()) {
+            stmt.execute("CREATE TABLE LEGACY_DATA (ID INT)");
+        }
+        Path smss = dbRoot.resolve("LegacyEngine__id.smss");
+        Files.writeString(smss, """
+                RDBMS_TYPE\tH2_DB
+                DRIVER\torg.h2.Driver
+                USERNAME\tsa
+                PASSWORD
+                CONNECTION_URL\tjdbc:h2:nio:/ignored/database;query_timeout=180000;early_filter=true;query_cache_size=24;cache_size=32768
+                """);
+        Path backupDir = tempDir.resolve("legacy-url-backups");
+
+        H2MigrationService service = new H2MigrationService(config(dbRoot, backupDir, false));
+
+        assertEquals(0, service.run());
+        assertEquals(1, service.getReport().successCount());
+        String updatedSmss = Files.readString(smss);
+        assertFalse(updatedSmss.toLowerCase().contains("early_filter"));
+        assertFalse(updatedSmss.toLowerCase().contains("query_cache_size"));
+        assertTrue(updatedSmss.contains("query_timeout=180000"));
+        assertTrue(updatedSmss.contains("cache_size=32768"));
+        var result = service.getReport().getResults().get(0);
+        assertEquals("OK", result.transformations().get("smssUrlUpdate"));
+        assertEquals(java.util.List.of("EARLY_FILTER", "QUERY_CACHE_SIZE"),
+                result.transformations().get("smssUrlRemovedSettings"));
+        assertTrue(Files.walk(backupDir).anyMatch(p -> p.getFileName().toString()
+                .equals("LegacyEngine__id.smss")));
+    }
+
+    @Test
+    void run_migratesPersistedProjectFrameAndIgnoresPostgresSmss() throws Exception {
+        Path projectRoot = tempDir.resolve("Semoss/project");
+        Path versionDir = projectRoot.resolve("App__id/app_root/version/insight-id");
+        Files.createDirectories(versionDir);
+        Files.writeString(versionDir.resolve(".mosfet"), "{\"insightName\":\"frame-test\"}");
+        Files.writeString(versionDir.resolve("wrong.smss"), """
+                RDBMS_TYPE\tPOSTGRES
+                DRIVER\torg.postgresql.Driver
+                USERNAME\tpostgres
+                PASSWORD\twrong
+                CONNECTION_URL\tjdbc:postgresql://localhost/postgres
+                """);
+
+        String dbName = versionDir.resolve("H2_Store_ABC").toAbsolutePath().toString();
+        try (IsolatedH2Driver oldH2 = IsolatedH2Driver.load("1.4.200");
+             Connection conn = oldH2.connect("jdbc:h2:" + dbName, "sa", "");
+             Statement stmt = conn.createStatement()) {
+            stmt.execute("CREATE TABLE FRAME_DATA (ID INT PRIMARY KEY, LABEL VARCHAR(50))");
+            stmt.execute("INSERT INTO FRAME_DATA VALUES (1, 'saved-frame')");
+        }
+
+        Path backupDir = tempDir.resolve("frame-backups");
+        H2MigrationService service = new H2MigrationService(config(projectRoot, backupDir, false));
+        int exitCode = service.run();
+
+        assertEquals(0, exitCode);
+        assertEquals(1, service.getReport().successCount());
+        var result = service.getReport().getResults().get(0);
+        assertEquals("PERSISTED_INSIGHT_FRAME_H2", result.targetType());
+        assertEquals("H2_FRAME_RUNTIME", result.credentialSource());
+        assertEquals("OK", result.transformations().get("runtimeSmokeOpen"));
+        assertFalse(Files.exists(versionDir.resolve("H2_Store_ABC_export.sql")));
+        assertTrue(result.preservedScriptPath().startsWith(backupDir.toAbsolutePath().toString()));
+
+        try (IsolatedH2Driver newH2 = IsolatedH2Driver.load("2.4.240");
+             Connection conn = newH2.connect("jdbc:h2:nio:" + dbName
+                     + ";CACHE_SIZE=65536;LOCK_MODE=1", "sa", "");
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT LABEL FROM FRAME_DATA WHERE ID=1")) {
+            assertTrue(rs.next());
+            assertEquals("saved-frame", rs.getString(1));
+        }
+    }
+
+    @Test
+    void run_skipsLiveInsightCacheWithoutBackupOrMutation() throws Exception {
+        Path semossRoot = tempDir.resolve("Semoss");
+        Path cacheDir = semossRoot.resolve("InsightCache/session/insight");
+        Files.createDirectories(cacheDir);
+        String dbName = cacheDir.resolve("H2_Store_CACHE").toAbsolutePath().toString();
+        try (IsolatedH2Driver oldH2 = IsolatedH2Driver.load("1.4.200");
+             Connection conn = oldH2.connect("jdbc:h2:" + dbName, "sa", "");
+             Statement stmt = conn.createStatement()) {
+            stmt.execute("CREATE TABLE CACHE_DATA (ID INT)");
+        }
+        Path dbFile = Path.of(dbName + ".mv.db");
+        long sizeBefore = Files.size(dbFile);
+        Path backupDir = tempDir.resolve("cache-backups");
+
+        H2MigrationService service = new H2MigrationService(config(semossRoot, backupDir, false));
+        int exitCode = service.run();
+
+        assertEquals(0, exitCode);
+        assertEquals(1, service.getReport().skippedCount());
+        assertEquals("TRANSIENT_INSIGHT_CACHE_H2", service.getReport().getResults().get(0).targetType());
+        assertEquals(sizeBefore, Files.size(dbFile));
+        assertEquals(0, Files.walk(backupDir).filter(p -> p.toString().endsWith(".mv.db")).count());
+        assertTrue(H2VersionDetector.detect(dbFile).needsMigration());
+    }
+
+    @Test
+    void run_skipsRetainedSystemH2WhenActiveSmssIsPostgres() throws Exception {
+        Path dbRoot = tempDir.resolve("db");
+        Path notification = dbRoot.resolve("Notification");
+        Files.createDirectories(notification);
+        String dbName = notification.resolve("database").toAbsolutePath().toString();
+        try (IsolatedH2Driver oldH2 = IsolatedH2Driver.load("1.4.200");
+             Connection conn = oldH2.connect("jdbc:h2:" + dbName, "sa", "");
+             Statement stmt = conn.createStatement()) {
+            stmt.execute("CREATE TABLE RETAINED_DATA (ID INT)");
+        }
+        Files.writeString(dbRoot.resolve("Notification.smss"), """
+                RDBMS_TYPE\tPOSTGRES
+                DRIVER\torg.postgresql.Driver
+                CONNECTION_URL\tjdbc:postgresql://localhost/postgres?currentSchema=notification
+                """);
+        Path dbFile = Path.of(dbName + ".mv.db");
+        long sizeBefore = Files.size(dbFile);
+        Path backupDir = tempDir.resolve("system-postgres-backups");
+
+        H2MigrationService service = new H2MigrationService(config(dbRoot, backupDir, false));
+
+        assertEquals(0, service.run());
+        assertEquals(0, service.getReport().failedCount());
+        assertEquals(1, service.getReport().skippedCount());
+        var result = service.getReport().getResults().get(0);
+        assertEquals("SYSTEM_H2", result.targetType());
+        assertEquals("POSTGRES", result.companionBackend());
+        assertTrue(result.reason().contains("outside active migration scope"));
+        assertEquals(sizeBefore, Files.size(dbFile));
+        assertEquals(0, Files.walk(backupDir).filter(p -> p.toString().endsWith(".mv.db")).count());
+        assertTrue(H2VersionDetector.detect(dbFile).needsMigration());
+    }
+
+    @Test
+    void run_dryRunFailsClosedForUnknownLocation() throws Exception {
+        Path unknownRoot = tempDir.resolve("unknown");
+        Files.createDirectories(unknownRoot);
+        String dbName = unknownRoot.resolve("unowned").toAbsolutePath().toString();
+        try (IsolatedH2Driver oldH2 = IsolatedH2Driver.load("1.4.200");
+             Connection conn = oldH2.connect("jdbc:h2:" + dbName, "sa", "");
+             Statement stmt = conn.createStatement()) {
+            stmt.execute("SELECT 1");
+        }
+
+        H2MigrationService service = new H2MigrationService(
+                config(unknownRoot, tempDir.resolve("unknown-backups"), true));
+
+        assertEquals(1, service.run());
+        assertEquals(1, service.getReport().failedCount());
+        assertEquals("UNKNOWN_H2", service.getReport().getResults().get(0).targetType());
+    }
+
+    @Test
+    void run_restoresBackupWhenRuntimeProfileOpenFails() throws Exception {
+        Path dbRoot = tempDir.resolve("db");
+        Path engine = dbRoot.resolve("Engine__id");
+        Files.createDirectories(engine);
+        String dbName = engine.resolve("database").toAbsolutePath().toString();
+        try (IsolatedH2Driver oldH2 = IsolatedH2Driver.load("1.4.200");
+             Connection conn = oldH2.connect("jdbc:h2:" + dbName, "sa", "");
+             Statement stmt = conn.createStatement()) {
+            stmt.execute("CREATE TABLE ORIGINAL_DATA (ID INT)");
+            stmt.execute("INSERT INTO ORIGINAL_DATA VALUES (7)");
+        }
+        Path smss = dbRoot.resolve("Engine__id.smss");
+        Files.writeString(smss, """
+                RDBMS_TYPE\tH2_DB
+                DRIVER\torg.h2.Driver
+                USERNAME\tsa
+                PASSWORD
+                CONNECTION_URL\tjdbc:h2:nio:/ignored/database;early_filter=true;UNSUPPORTED_FOR_TEST=1
+                """);
+        String originalSmss = Files.readString(smss);
+        Path dbFile = Path.of(dbName + ".mv.db");
+
+        H2MigrationService service = new H2MigrationService(
+                config(dbRoot, tempDir.resolve("restore-backups"), false));
+        int exitCode = service.run();
+
+        assertEquals(1, exitCode);
+        var result = service.getReport().getResults().get(0);
+        assertEquals("FAILED", result.status().name());
+        assertEquals("FAILED", result.transformations().get("runtimeSmokeOpen"));
+        assertEquals("OK", result.transformations().get("restore"));
+        assertEquals("OK", result.transformations().get("smssRestore"));
+        assertEquals(originalSmss, Files.readString(smss));
+        assertTrue(H2VersionDetector.detect(dbFile).needsMigration(),
+                "restored fixture must still be H2 1.x");
+
+        try (IsolatedH2Driver oldH2 = IsolatedH2Driver.load("1.4.200");
+             Connection conn = oldH2.connect("jdbc:h2:" + dbName, "sa", "");
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT ID FROM ORIGINAL_DATA")) {
+            assertTrue(rs.next());
+            assertEquals(7, rs.getInt(1));
+        }
+    }
+
+    @Test
+    void run_restoresBackupWhenExportCredentialsAreWrong() throws Exception {
+        Path dbRoot = tempDir.resolve("db");
+        Path engine = dbRoot.resolve("Engine__id");
+        Files.createDirectories(engine);
+        String dbName = engine.resolve("database").toAbsolutePath().toString();
+        try (IsolatedH2Driver oldH2 = IsolatedH2Driver.load("1.4.200");
+             Connection conn = oldH2.connect("jdbc:h2:" + dbName, "sa", "");
+             Statement stmt = conn.createStatement()) {
+            stmt.execute("CREATE TABLE ORIGINAL_DATA (ID INT)");
+        }
+        Files.writeString(dbRoot.resolve("Engine__id.smss"), """
+                RDBMS_TYPE\tH2_DB
+                DRIVER\torg.h2.Driver
+                USERNAME\twrong_user
+                PASSWORD\twrong_password
+                CONNECTION_URL\tjdbc:h2:nio:/ignored/database
+                """);
+        Path dbFile = Path.of(dbName + ".mv.db");
+
+        H2MigrationService service = new H2MigrationService(
+                config(dbRoot, tempDir.resolve("export-failure-backups"), false));
+
+        assertEquals(1, service.run());
+        assertEquals("OK", service.getReport().getResults().get(0).transformations().get("restore"));
+        assertTrue(H2VersionDetector.detect(dbFile).needsMigration());
+    }
+
+    private MigrationConfig config(Path dbDir, Path backupDir, boolean dryRun) {
+        return MigrationConfig.fromArgs(new String[]{
+                "--mode=local",
+                "--db-dir=" + dbDir,
+                "--backup-dir=" + backupDir,
+                dryRun ? "--dry-run" : "--dry-run=false"
+        });
+    }
+
+    private void writeH2Smss(Path smssFile, String username, String password) throws Exception {
+        Files.writeString(smssFile, """
+                RDBMS_TYPE\tH2_DB
+                DRIVER\torg.h2.Driver
+                USERNAME\t%s
+                PASSWORD\t%s
+                CONNECTION_URL\tjdbc:h2:nio:/ignored/database
+                """.formatted(username, password));
     }
 }
