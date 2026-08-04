@@ -47,9 +47,9 @@ public class H2MigrationService {
 
     public static void main(String[] args) {
 
-        if (args.length == 0 || "--help".equals(args[0])) {
+        if (args.length > 0 && ("--help".equals(args[0]) || "-h".equals(args[0]))) {
             System.out.println(MigrationConfig.usage());
-            System.exit(args.length == 0 ? 1 : 0);
+            System.exit(0);
         }
 
         MigrationConfig config;
@@ -63,11 +63,15 @@ public class H2MigrationService {
             return;
         }
 
-        LOGGER.info("H2 Migration Service v1.1.0");
+        LOGGER.info("H2 Migration Service v1.2.0");
         LOGGER.info("Mode:               " + config.mode());
         LOGGER.info("Database directory:  " + config.dbDir());
         LOGGER.info("Backup directory:    " + config.backupDir());
         LOGGER.info("Storage provider:    " + config.storageProvider());
+        if ("gcs".equalsIgnoreCase(config.storageProvider())
+                || "google_cloud_storage".equalsIgnoreCase(config.storageProvider())) {
+            LOGGER.info("GCS transfer backend: " + config.gcsTransferBackend());
+        }
         LOGGER.info("Dry run:             " + config.dryRun());
 
         H2MigrationService service = new H2MigrationService(config);
@@ -135,121 +139,11 @@ public class H2MigrationService {
      * Migrate H2 databases in cloud storage via RClone.
      */
     void migrateCloud() throws IOException, InterruptedException {
-        RCloneClient rclone = RCloneClient.fromConfig(config);
-        Path stagingDir = Files.createTempDirectory("h2-cloud-staging");
-        CloudDatabaseDiscovery cloudDiscovery = new CloudDatabaseDiscovery(rclone, stagingDir);
-
-        String remotePath = resolveRemotePath();
-        List<String> remoteFiles = cloudDiscovery.discoverRemoteDatabases(remotePath);
-        LOGGER.info("Found " + remoteFiles.size() + " H2 database files in cloud");
-
-        if (remoteFiles.isEmpty()) return;
-
         try (IsolatedH2Driver oldDriver = IsolatedH2Driver.load(OLD_H2);
              IsolatedH2Driver newDriver = IsolatedH2Driver.load(NEW_H2)) {
-
-            BackupManager backupMgr = new BackupManager(config.backupDir());
-            DatabaseExporter exporter = new DatabaseExporter(oldDriver);
-            DatabaseImporter importer = new DatabaseImporter(newDriver);
-            String runLabel = BackupManager.generateRunLabel();
-
-            for (String relPath : remoteFiles) {
-                long start = System.currentTimeMillis();
-                String dbId = relPath;
-                DatabaseResult result = null;
-                try {
-                    // In dry-run, skip downloading entirely — just report what was found
-                    if (config.dryRun()) {
-                        report.addResult(dbId, Status.SKIPPED,
-                                "Dry run - would migrate", System.currentTimeMillis() - start);
-                        continue;
-                    }
-
-                    // Download only the DB file
-                    Path localFile = cloudDiscovery.downloadDatabase(remotePath, relPath);
-
-                    // Encryption probe (Category H)
-                    if (looksEncrypted(localFile)) {
-                        report.addResult(dbId, Status.FAILED,
-                                        "Database appears to be CIPHER-encrypted; utility does not support "
-                                                + "encrypted H2 migration — decrypt first",
-                                        System.currentTimeMillis() - start)
-                                .errorClass("EncryptedDatabaseException");
-                        continue;
-                    }
-
-                    // Check version
-                    var detection = H2VersionDetector.detect(localFile);
-                    if (!detection.needsMigration()) {
-                        report.addResult(dbId, Status.SKIPPED,
-                                detection.reason(), System.currentTimeMillis() - start);
-                        continue;
-                    }
-
-                    // Download companion SMSS only when we know migration is needed
-                    cloudDiscovery.downloadCompanionSmss(remotePath, relPath);
-
-                    // Backup, export, import
-                    backupMgr.backup(localFile, stagingDir, runLabel);
-                    SmssCredentialReader.Credentials creds = SmssCredentialReader.readCredentials(
-                            localFile, config.defaultUsername(), config.defaultPassword());
-                    Path script = exporter.export(localFile, creds.username(), creds.password());
-
-                    // Preserve export script in backup directory
-                    Path preserved = preserveScript(script, stagingDir, config.backupDir(), runLabel);
-
-                    result = report.addResult(dbId, Status.SUCCESS,
-                            "pending", 0);
-                    if (preserved != null) result.preservedScriptPath(preserved.toAbsolutePath().toString());
-
-                    // Rewrite legacy type aliases, quote ROW, strip aggregates (Categories A/B/C)
-                    RewriteReport rr = ScriptRewriter.rewriteAndScanInPlace(script);
-                    recordRewrite(result, rr);
-
-                    // Record target-URL compatibility flags (Categories B/D/F)
-                    result.transformation("targetUrlFlags", DatabaseImporter.targetUrlFlags());
-
-                    try {
-                        importer.importDatabase(localFile, script, creds.username(), creds.password());
-                    } catch (SQLException e) {
-                        recordSqlFailure(result, e);
-                        result.status(Status.FAILED)
-                                .reason(e.getMessage())
-                                .durationMs(System.currentTimeMillis() - start);
-                        throw e;
-                    }
-
-                    // Post-migration smoke open (Category I)
-                    try {
-                        importer.smokeOpen(localFile, creds.username(), creds.password());
-                        result.transformation("smokeOpen", "OK");
-                    } catch (SQLException e) {
-                        recordSqlFailure(result, e);
-                        result.transformation("smokeOpen", "FAILED");
-                        result.status(Status.FAILED)
-                                .reason("Post-migration smoke open failed: " + e.getMessage())
-                                .durationMs(System.currentTimeMillis() - start);
-                        throw e;
-                    }
-
-                    // Upload migrated file back
-                    cloudDiscovery.uploadDatabase(remotePath, relPath, localFile);
-
-                    // Cleanup staging script + rewriter backup
-                    Files.deleteIfExists(script);
-                    Files.deleteIfExists(script.resolveSibling(script.getFileName().toString() + ".pre-rewrite.bak"));
-
-                    result.reason("Migrated and uploaded").durationMs(System.currentTimeMillis() - start);
-
-                } catch (Exception e) {
-                    LOGGER.warn("Failed to migrate cloud DB: " + relPath, e);
-                    if (result == null) {
-                        report.addResult(dbId, Status.FAILED,
-                                e.getMessage(), System.currentTimeMillis() - start);
-                    }
-                    // otherwise already updated above
-                }
-            }
+            CloudMigrationCoordinator coordinator = new CloudMigrationCoordinator(
+                    config, report, this, oldDriver, newDriver);
+            coordinator.execute();
         }
     }
 
@@ -257,9 +151,9 @@ public class H2MigrationService {
      * Migrate a single local database file: detect → backup → export → rewrite → import
      * → smoke open → cleanup.
      */
-    void migrateSingleTarget(DatabaseTarget target, Path baseDir, BackupManager backupMgr,
-                             DatabaseExporter exporter, DatabaseImporter importer,
-                             String runLabel) {
+    DatabaseResult migrateSingleTarget(DatabaseTarget target, Path baseDir, BackupManager backupMgr,
+                                       DatabaseExporter exporter, DatabaseImporter importer,
+                                       String runLabel) {
         long start = System.currentTimeMillis();
         Path dbFile = target.databaseFile();
         DatabaseResult result = null;
@@ -274,43 +168,38 @@ public class H2MigrationService {
                 String reason = target.resolutionError() == null
                         ? "Transient live InsightCache database; runtime will recreate it"
                         : target.resolutionError();
-                report.addResult(target, Status.SKIPPED,
+                return report.addResult(target, Status.SKIPPED,
                         reason,
                         System.currentTimeMillis() - start);
-                return;
             }
 
             if (target.disposition() == DatabaseTarget.Disposition.MANUAL_REVIEW
                     || target.resolutionError() != null || !target.readyToMigrate()) {
                 String reason = target.resolutionError() == null
                         ? "Target is not resolved for migration" : target.resolutionError();
-                report.addResult(target, Status.FAILED, reason,
+                return report.addResult(target, Status.FAILED, reason,
                         System.currentTimeMillis() - start);
-                return;
             }
 
             if (looksEncrypted(dbFile)) {
-                report.addResult(target, Status.FAILED,
+                return report.addResult(target, Status.FAILED,
                                 "Database appears to be CIPHER-encrypted; utility does not support "
                                         + "encrypted H2 migration — decrypt first",
                                 System.currentTimeMillis() - start)
                         .errorClass("EncryptedDatabaseException");
-                return;
             }
 
             // 1. Version detection
             var detection = H2VersionDetector.detect(dbFile);
             if (!detection.needsMigration()) {
-                report.addResult(target, Status.SKIPPED,
+                return report.addResult(target, Status.SKIPPED,
                         detection.reason(), System.currentTimeMillis() - start);
-                return;
             }
 
             if (config.dryRun()) {
-                report.addResult(target, Status.SKIPPED,
+                return report.addResult(target, Status.SKIPPED,
                         "Dry run - would migrate (" + detection.reason() + ")",
                         System.currentTimeMillis() - start);
-                return;
             }
 
             result = report.addResult(target, Status.SUCCESS, "pending", 0);
@@ -402,6 +291,7 @@ public class H2MigrationService {
                 }
             }
         }
+        return result;
     }
 
     private Path exportScriptPath(Path dbFile, Path baseDir, Path backupDir, String runLabel) {
@@ -525,26 +415,6 @@ public class H2MigrationService {
         } catch (IOException e) {
             return false;
         }
-    }
-
-    /**
-     * Determine the remote bucket/container path based on the storage provider.
-     */
-    private String resolveRemotePath() {
-        String provider = config.storageProvider().toLowerCase();
-        String bucket = switch (provider) {
-            case "s3", "amazon_s3" -> config.s3Bucket();
-            case "gcs", "google_cloud_storage" -> config.gcsBucket();
-            case "minio" -> config.minioBucket();
-            case "azure_blob", "azure" -> "";
-            case "local_file_system" -> config.dbDir() != null ? config.dbDir().toString() : "";
-            default -> "";
-        };
-        String searchPath = config.searchPath();
-        if (searchPath != null && !searchPath.isEmpty()) {
-            return bucket.isEmpty() ? searchPath : bucket + "/" + searchPath;
-        }
-        return bucket;
     }
 
     public MigrationReport getReport() {

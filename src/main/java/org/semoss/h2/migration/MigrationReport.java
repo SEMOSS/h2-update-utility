@@ -61,6 +61,21 @@ public final class MigrationReport {
         private String companionSmssPath;
         private String companionBackend;
 
+        // Cloud identity and publication state (never contains authentication material)
+        private String storageProvider;
+        private String authenticationMode;
+        private String scopeType;
+        private String scopeId;
+        private String remotePath;
+        private Long sourceSize;
+        private String sourceModified;
+        private String sourceSha256;
+        private String finalSha256;
+        private String remoteBackupPath;
+        private String remoteCandidatePath;
+        private String promotionStatus;
+        private String rollbackStatus;
+
         // Category K — detailed error context
         private String sqlState;
         private Integer errorCode;
@@ -118,6 +133,30 @@ public final class MigrationReport {
             for (String warning : target.warnings()) addWarning(warning);
             return this;
         }
+        public DatabaseResult cloudIdentity(String provider, String authMode,
+                                            String cloudScopeType, String cloudScopeId,
+                                            String cloudRemotePath) {
+            this.storageProvider = provider;
+            this.authenticationMode = authMode;
+            this.scopeType = cloudScopeType;
+            this.scopeId = cloudScopeId;
+            this.remotePath = cloudRemotePath;
+            return this;
+        }
+        public DatabaseResult sourceObject(long size, String modified, String sha256) {
+            this.sourceSize = size;
+            this.sourceModified = modified;
+            this.sourceSha256 = sha256;
+            return this;
+        }
+        public DatabaseResult cloudWorkPaths(String backupPath, String candidatePath) {
+            this.remoteBackupPath = backupPath;
+            this.remoteCandidatePath = candidatePath;
+            return this;
+        }
+        public DatabaseResult finalSha256(String sha256) { this.finalSha256 = sha256; return this; }
+        public DatabaseResult promotionStatus(String status) { this.promotionStatus = status; return this; }
+        public DatabaseResult rollbackStatus(String status) { this.rollbackStatus = status; return this; }
         public DatabaseResult addWarning(String w) { warnings.add(w); return this; }
         public DatabaseResult transformation(String key, Object value) { transformations.put(key, value); return this; }
     }
@@ -189,6 +228,19 @@ public final class MigrationReport {
             if (r.runtimeProfile != null) entry.put("runtimeProfile", r.runtimeProfile);
             if (r.companionSmssPath != null) entry.put("companionSmssPath", r.companionSmssPath);
             if (r.companionBackend != null) entry.put("companionBackend", r.companionBackend);
+            if (r.storageProvider != null) entry.put("storageProvider", r.storageProvider);
+            if (r.authenticationMode != null) entry.put("authenticationMode", r.authenticationMode);
+            if (r.scopeType != null) entry.put("scopeType", r.scopeType);
+            if (r.scopeId != null) entry.put("scopeId", r.scopeId);
+            if (r.remotePath != null) entry.put("remotePath", r.remotePath);
+            if (r.sourceSize != null) entry.put("sourceSize", r.sourceSize);
+            if (r.sourceModified != null) entry.put("sourceModified", r.sourceModified);
+            if (r.sourceSha256 != null) entry.put("sourceSha256", r.sourceSha256);
+            if (r.finalSha256 != null) entry.put("finalSha256", r.finalSha256);
+            if (r.remoteBackupPath != null) entry.put("remoteBackupPath", r.remoteBackupPath);
+            if (r.remoteCandidatePath != null) entry.put("remoteCandidatePath", r.remoteCandidatePath);
+            if (r.promotionStatus != null) entry.put("promotionStatus", r.promotionStatus);
+            if (r.rollbackStatus != null) entry.put("rollbackStatus", r.rollbackStatus);
             if (r.preservedScriptPath != null) entry.put("preservedScriptPath", r.preservedScriptPath);
             if (r.sqlState != null) entry.put("sqlState", r.sqlState);
             if (r.errorCode != null) entry.put("errorCode", r.errorCode);

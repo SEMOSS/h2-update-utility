@@ -18,13 +18,20 @@ LABEL org.opencontainers.image.vendor="Semoss"
 
 # Install rclone from a pinned release (override with --build-arg RCLONE_VERSION=...)
 ARG RCLONE_VERSION=v1.71.0
+ARG GCLOUD_VERSION=577.0.0
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl unzip ca-certificates && \
+    apt-get install -y --no-install-recommends curl unzip ca-certificates python3 && \
     arch="$(dpkg --print-architecture)" && \
     curl -fsSL "https://downloads.rclone.org/${RCLONE_VERSION}/rclone-${RCLONE_VERSION}-linux-${arch}.zip" -o /tmp/rclone.zip && \
     unzip -j /tmp/rclone.zip "*/rclone" -d /usr/local/bin && \
     chmod 755 /usr/local/bin/rclone && \
-    rm -f /tmp/rclone.zip && \
+    case "$arch" in amd64) gcloud_arch="x86_64" ;; arm64) gcloud_arch="arm" ;; *) exit 1 ;; esac && \
+    curl -fsSL "https://storage.googleapis.com/cloud-sdk-release/google-cloud-cli-${GCLOUD_VERSION}-linux-${gcloud_arch}.tar.gz" -o /tmp/gcloud.tar.gz && \
+    mkdir -p /opt && \
+    tar -xzf /tmp/gcloud.tar.gz -C /opt && \
+    CLOUDSDK_PYTHON=/usr/bin/python3 /opt/google-cloud-sdk/install.sh --quiet --path-update=false --command-completion=false --usage-reporting=false && \
+    ln -s /opt/google-cloud-sdk/bin/gcloud /usr/local/bin/gcloud && \
+    rm -f /tmp/rclone.zip /tmp/gcloud.tar.gz && \
     apt-get remove -y curl unzip && \
     apt-get autoremove -y && \
     apt-get clean && rm -rf /var/lib/apt/lists/*

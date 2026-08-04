@@ -120,6 +120,18 @@ public record DatabaseTarget(
                 && resolutionError == null;
     }
 
+    /** Return the same resolved target relocated to a verified downloaded object. */
+    public DatabaseTarget relocated(Path relocatedDatabaseFile) {
+        if (runtimeUrl == null) {
+            throw new IllegalStateException("Cannot relocate a target without a runtime URL");
+        }
+        return new DatabaseTarget(relocatedDatabaseFile, targetType, disposition,
+                credentialSource, runtimeProfile, credentials, companionSmss,
+                companionBackend,
+                RuntimeConnectionUrlBuilder.fromSmss(relocatedDatabaseFile, runtimeUrl),
+                warnings, resolutionError);
+    }
+
     @Override
     public String toString() {
         return "DatabaseTarget[databaseFile=" + databaseFile

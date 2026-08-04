@@ -2,7 +2,9 @@ package org.semoss.h2.migration;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 
 import org.semoss.h2.migration.DatabaseTarget.CredentialSource;
 import org.semoss.h2.migration.DatabaseTarget.TargetType;
@@ -16,6 +18,12 @@ public final class DatabaseCredentialResolver {
     private DatabaseCredentialResolver() {}
 
     public static DatabaseTarget resolve(DatabaseTarget target, MigrationConfig config) {
+        return resolve(target, config, null);
+    }
+
+    /** Resolve a cloud primary target against its exact downloaded SMSS scope. */
+    public static DatabaseTarget resolve(DatabaseTarget target, MigrationConfig config,
+                                         List<Path> explicitPrimarySmssCandidates) {
         return switch (target.targetType()) {
             case PERSISTED_INSIGHT_FRAME_H2 -> target.resolved(
                     CredentialSource.H2_FRAME_RUNTIME,
@@ -38,13 +46,24 @@ public final class DatabaseCredentialResolver {
                     "H2",
                     RuntimeConnectionUrlBuilder.forH2Nio(target.databaseFile()),
                     List.of());
-            case SYSTEM_H2, USER_ENGINE_H2 -> resolvePrimary(target, config);
+            case SYSTEM_H2, USER_ENGINE_H2 -> resolvePrimary(
+                    target, config, explicitPrimarySmssCandidates);
             case TRANSIENT_INSIGHT_CACHE_H2, UNKNOWN_H2 -> target;
         };
     }
 
-    private static DatabaseTarget resolvePrimary(DatabaseTarget target, MigrationConfig config) {
-        List<Path> candidates = SmssCredentialReader.findSmssFiles(target.databaseFile());
+    private static DatabaseTarget resolvePrimary(DatabaseTarget target, MigrationConfig config,
+                                                 List<Path> explicitCandidates) {
+        List<Path> candidates = explicitCandidates == null
+                ? SmssCredentialReader.findSmssFiles(target.databaseFile())
+                : explicitCandidates.stream()
+                        .map(path -> path.toAbsolutePath().normalize())
+                        .sorted(Comparator
+                                .comparing((Path path) -> !path.getFileName().toString()
+                                        .toLowerCase(Locale.ROOT).contains("_h2.smss"))
+                                .thenComparing(path -> path.getFileName().toString()
+                                        .toLowerCase(Locale.ROOT)))
+                        .toList();
         List<String> warnings = new ArrayList<>();
         SmssCredentialReader.SmssMetadata selected = null;
         SmssCredentialReader.SmssMetadata firstCandidate = null;
