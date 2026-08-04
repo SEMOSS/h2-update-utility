@@ -17,7 +17,7 @@ LABEL org.opencontainers.image.licenses="Apache-2.0"
 LABEL org.opencontainers.image.vendor="Semoss"
 
 # Install rclone from a pinned release (override with --build-arg RCLONE_VERSION=...)
-ARG RCLONE_VERSION=v1.71.0
+ARG RCLONE_VERSION=v1.74.2
 ARG GCLOUD_VERSION=577.0.0
 RUN apt-get update && \
     apt-get install -y --no-install-recommends curl unzip ca-certificates python3 && \

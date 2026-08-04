@@ -222,6 +222,10 @@ Do not also set `AZ_USE_MSI`, `AZ_ACCOUNT_NAME`, or `AZ_PRIMARY_KEY`; Azure
 requires exactly one authentication mode. The connection string is passed to
 rclone only through its child-process environment. It is never converted into a
 different credential or placed in command arguments, logs, or reports.
+The bundled migration image pins rclone `v1.74.2`, which supports Azure Blob's
+direct `connection_string` configuration. When running the JAR outside the
+image, use a connection-string-capable rclone release rather than the older
+`v1.71.0` client.
 
 ### Running the approved actual migration
 
