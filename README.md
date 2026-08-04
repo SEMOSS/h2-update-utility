@@ -80,151 +80,183 @@ persisted `.smss` after a successful database import. The `.smss` is backed up
 first and restored with the database if the update or runtime-open validation
 fails. Dry-run reports the planned settings removal without editing the file.
 
-### Cloud Mode (S3)
+### Cloud storage layouts
+
+S3, MinIO, and GCS use the same object layout inside one bucket:
+
+```text
+<bucket>/
+├── semoss-db/
+│   ├── <engineId>/
+│   │   ├── database.mv.db
+│   │   └── audit_log_database.mv.db
+│   └── <engineId>-smss/
+│       └── <engine-name>__<engineId>.smss
+└── semoss-project/
+    ├── <projectId>/
+    │   ├── insights_database.mv.db
+    │   └── app_root/version/<insightId>/H2_Store_<id>.mv.db
+    └── <projectId>-smss/
+        └── <project-name>__<projectId>.smss
+```
+
+The engine's `-smss` prefix is required when its primary `database.mv.db` is
+present. The project `-smss` prefix is part of the SEMOSS storage layout, but
+project insight and persisted-frame databases use generated H2 runtime profiles,
+so the utility does not download that SMSS object for those migrations.
+
+Azure uses one container for each engine/project and separate SMSS containers:
+
+```text
+container: db-<engineId>
+├── database.mv.db
+└── audit_log_database.mv.db
+
+container: db-<engineId>-smss
+└── <engine-name>__<engineId>.smss
+
+container: project-<projectId>
+├── insights_database.mv.db
+└── app_root/version/<insightId>/H2_Store_<id>.mv.db
+
+container: project-<projectId>-smss
+└── <project-name>__<projectId>.smss
+```
+
+For S3, MinIO, and GCS, `SEARCH_PATH` must be `semoss-db`,
+`semoss-db/<engineId>`, `semoss-project`, or `semoss-project/<projectId>`.
+Azure processes one container per invocation, so `SEARCH_PATH` must be
+`db-<engineId>` or `project-<projectId>`.
+
+### Basic S3 example
+
+Use the utility's `S3_*` variables for injected credentials. `S3_SESSION_TOKEN`
+is required only for temporary STS credentials.
 
 ```bash
-java -jar target/h2-migration-service.jar \
-  --mode=cloud \
-  --backup-dir=/tmp/h2-backups \
-  --semoss-storage-provider=s3 \
-  --s3-region=us-east-1 \
-  --s3-bucket=my-semoss-bucket \
-  --s3-access-key=AKID \
-  --s3-secret-key=SECRET
+export MODE=cloud
+export BACKUP_DIR=/tmp/h2-backups/s3
+export SEMOSS_STORAGE_PROVIDER=s3
+export S3_REGION=us-east-1
+export S3_BUCKET=my-semoss-bucket
+export S3_ACCESS_KEY='<access-key>'
+export S3_SECRET_KEY='<secret-key>'
+# export S3_SESSION_TOKEN='<session-token>'
+export SEARCH_PATH=semoss-db
+export DRY_RUN=true
+
+java -jar target/h2-migration-service.jar
 ```
 
-#### AWS S3 Setup with Temporary Credentials (STS)
+If `S3_ACCESS_KEY` and `S3_SECRET_KEY` are omitted, rclone uses the inherited
+AWS default credential chain, including EKS/ECS/EC2 role credentials and the
+standard `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN`
+variables.
 
-For testing or environments where long-lived credentials are not desirable, you can use
-AWS STS to generate temporary access keys that expire automatically.
-
-**1. Create an IAM policy** scoped to your bucket (IAM → Policies → Create policy → JSON):
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": ["s3:PutObject", "s3:GetObject", "s3:ListBucket", "s3:DeleteObject"],
-      "Resource": [
-        "arn:aws:s3:::YOUR-BUCKET-NAME",
-        "arn:aws:s3:::YOUR-BUCKET-NAME/*"
-      ]
-    }
-  ]
-}
-```
-
-**2. Create an IAM role** (IAM → Roles → Create role):
-
-- Trusted entity: **AWS account → This account**
-- Attach the policy created above
-- Note the role ARN (e.g. `arn:aws:iam::123456789012:role/h2-migration-test`)
-
-**3. Update the role's trust policy** to allow your identity to assume it
-(IAM → Roles → your role → Trust relationships → Edit):
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": {
-        "AWS": "arn:aws:iam::123456789012:role/YOUR_CALLER_ROLE"
-      },
-      "Action": "sts:AssumeRole"
-    }
-  ]
-}
-```
-
-> **Tip:** Run `aws sts get-caller-identity` to find your current identity ARN.
-> If you are using AWS SSO / Identity Center, the role ARN may include a path prefix
-> (e.g. `role/aws-reserved/sso.amazonaws.com/YourRole`). The trust policy principal
-> must match the full ARN exactly.
-
-**4. Assume the role** to get temporary credentials:
+### Basic MinIO example
 
 ```bash
-aws sts assume-role \
-  --role-arn arn:aws:iam::123456789012:role/h2-migration-test \
-  --role-session-name h2-migration-test \
-  --duration-seconds 3600
+export MODE=cloud
+export BACKUP_DIR=/tmp/h2-backups/minio
+export SEMOSS_STORAGE_PROVIDER=minio
+export MINIO_ENDPOINT='https://minio.example.com'
+export MINIO_REGION=us-east-1
+export MINIO_BUCKET=semoss
+export MINIO_ACCESS_KEY='<access-key>'
+export MINIO_SECRET_KEY='<secret-key>'
+export SEARCH_PATH=semoss-db
+export DRY_RUN=true
+
+java -jar target/h2-migration-service.jar
 ```
 
-> If the trust policy includes an `sts:ExternalId` condition, add `--external-id <value>`.
+For a private CA, mount the certificate and set, for example,
+`ADDITIONAL_RCLONE_PARAMETERS='--ca-cert /var/run/secrets/minio/ca.crt'`.
 
-This returns `AccessKeyId`, `SecretAccessKey`, and `SessionToken` (valid for 1 hour).
+### Basic GCS example
 
-**5. Run the migration** with the temporary credentials:
+Mount the service-account JSON as a read-only file and pass its path:
 
 ```bash
-java -jar target/h2-migration-service.jar \
-  --mode=cloud \
-  --semoss-storage-provider=s3 \
-  --s3-region=us-east-2 \
-  --s3-bucket=my-semoss-bucket \
-  --s3-access-key=<AccessKeyId> \
-  --s3-secret-key=<SecretAccessKey> \
-  --additional-rclone-parameters="--s3-session-token=<SessionToken>" \
-  --dry-run
+export MODE=cloud
+export BACKUP_DIR=/tmp/h2-backups/gcs
+export SEMOSS_STORAGE_PROVIDER=gcs
+export GCS_BUCKET=my-semoss-bucket
+export GCS_REGION=us-east1
+export GCS_TRANSFER_BACKEND=gcloud
+export GCS_SERVICE_ACCOUNT_FILE=/var/run/secrets/gcp/service-account.json
+export SEARCH_PATH=semoss-project
+export DRY_RUN=true
+
+java -jar target/h2-migration-service.jar
 ```
 
-Or using environment variables:
+The `gcloud` backend uses `gcloud storage` for listing, metadata, downloads,
+uploads, and deletes. The mounted credential path is passed to the child process
+through `CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE`; the JSON contents are never
+placed in command arguments, logs, or reports. `GOOGLE_APPLICATION_CREDENTIALS`
+is mapped to the same override when `GCS_SERVICE_ACCOUNT_FILE` is omitted.
+
+`GCS_TRANSFER_BACKEND` defaults to `rclone` for backward compatibility. Set it
+to `gcloud` to avoid rclone entirely for GCS. `GCLOUD` can override the binary
+path and defaults to `gcloud`. The injected `GCS_SERVICE_ACCOUNT_JSON` value is
+supported only by the rclone backend; use a read-only mounted file with the
+gcloud backend.
+
+### Basic Azure Blob example
+
+The normal Azure setup uses a storage connection string:
 
 ```bash
-export S3_ACCESS_KEY="<AccessKeyId>"
-export S3_SECRET_KEY="<SecretAccessKey>"
-export ADDITIONAL_RCLONE_PARAMETERS="--s3-session-token=<SessionToken>"
+export MODE=cloud
+export BACKUP_DIR=/tmp/h2-backups/azure
+export SEMOSS_STORAGE_PROVIDER=azure
+export AZ_CONN_STRING='<azure-storage-connection-string>'
+export SEARCH_PATH=db-ENGINE_ID
+export DRY_RUN=true
 
-java -jar target/h2-migration-service.jar \
-  --mode=cloud \
-  --semoss-storage-provider=s3 \
-  --s3-region=us-east-2 \
-  --s3-bucket=my-semoss-bucket \
-  --dry-run
+java -jar target/h2-migration-service.jar
 ```
 
-> Start with `--dry-run` to verify bucket connectivity and database discovery
-> before running an actual migration.
+Do not also set `AZ_USE_MSI`, `AZ_ACCOUNT_NAME`, or `AZ_PRIMARY_KEY`; Azure
+requires exactly one authentication mode. The connection string is passed to
+rclone only through its child-process environment. It is never converted into a
+different credential or placed in command arguments, logs, or reports.
 
-### Cloud Mode (MinIO)
+### Running the approved actual migration
+
+Every provider example above is intentionally a read-only dry run. Review
+`$BACKUP_DIR/migration-report.json`, stop every SEMOSS node that can access the
+selected storage scope, and then run:
 
 ```bash
-java -jar target/h2-migration-service.jar \
-  --mode=cloud \
-  --backup-dir=/tmp/h2-backups \
-  --semoss-storage-provider=minio \
-  --minio-endpoint=http://localhost:9000 \
-  --minio-region=us-east-1 \
-  --minio-access-key=minioadmin \
-  --minio-secret-key=minioadmin \
-  --minio-bucket=semoss
+export DRY_RUN=false
+export CONFIRM_SEMOSS_STOPPED=true
+
+java -jar target/h2-migration-service.jar
 ```
 
-### Narrowing the Search Path
-
-Use `--search-path` to limit discovery to a subdirectory within the storage root (local or cloud):
-
-```bash
-java -jar target/h2-migration-service.jar \
-  --mode=cloud \
-  --backup-dir=/tmp/h2-backups \
-  --search-path=db/ \
-  --semoss-storage-provider=s3 \
-  ...
-```
+Run a separate invocation for `semoss-db` and `semoss-project`. For Azure, run
+one invocation for each `db-<engineId>` or `project-<projectId>` container.
 
 ### Dry Run
 
-Add `--dry-run` to any command to preview without modifying files.
+Add `--dry-run` to preview without remote writes. Cloud dry-run still downloads
+the selected databases and exact SMSS objects so it can verify H2 headers,
+versions, credentials, target classifications, hashes, and planned URL changes.
 
 The JSON report includes each database's `targetType`, `disposition`,
 `credentialSource`, `runtimeProfile`, companion SMSS/backend when applicable,
 and configuration warnings. Passwords and concrete runtime URLs are never
 written to the report.
+
+Actual cloud runs create a verified remote backup before replacing any source
+object. S3, MinIO, and GCS retain backups under
+`_semoss-h2-migration/<runId>/backup`; Azure retains them in the
+`semoss-h2-migration` container. Candidate objects are removed after successful
+scope verification, while backups remain until an operator deliberately removes
+them. If publication fails after promotion begins, every changed object in that
+engine/project scope is restored and hash-verified from the remote backup.
 
 ### Environment Variables
 
@@ -239,14 +271,17 @@ All CLI flags can be set via environment variables (matching Semoss conventions)
 | `DEFAULT_USER` | Fallback DB username (default: `sa`) |
 | `DEFAULT_PASSWORD` | Fallback DB password (default: empty) |
 | `SEARCH_PATH` | Subdirectory within storage root to search |
+| `CONFIRM_SEMOSS_STOPPED` | Required acknowledgement for actual cloud migration |
 | `SEMOSS_STORAGE_PROVIDER` | Cloud provider: `s3`, `azure` (also accepts `azure_blob`), `gcs`, `minio`, `local_file_system` |
-| `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY` | AWS S3 config |
-| `AZ_ACCOUNT_NAME`, `AZ_PRIMARY_KEY`, `AZ_CONN_STRING` | Azure config |
-| `AZ_USE_MSI`, `AZ_GENERATE_DYNAMIC_SAS` | Azure auth flags (`true`/`false`) |
-| `GCS_SERVICE_ACCOUNT_FILE`, `GCS_BUCKET`, `GCS_REGION` | GCS config |
+| `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_SESSION_TOKEN` | AWS S3 config; static values are optional when workload identity is available |
+| `AZ_ACCOUNT_NAME`, `AZ_PRIMARY_KEY`, `AZ_CONN_STRING` | Azure account/key or connection-string authentication |
+| `AZ_USE_MSI` | Enable Azure managed-identity authentication instead of connection-string or account/key authentication |
+| `GCS_SERVICE_ACCOUNT_FILE`, `GCS_SERVICE_ACCOUNT_JSON`, `GCS_BUCKET`, `GCS_REGION` | GCS credentials and bucket configuration |
+| `GCS_TRANSFER_BACKEND` | GCS transfer implementation: `rclone` (default) or `gcloud` |
+| `GCLOUD` | Path to the gcloud binary (default: `gcloud`) |
 | `MINIO_ENDPOINT`, `MINIO_REGION`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `MINIO_BUCKET` | MinIO config |
 | `RCLONE` | Path to rclone binary (default: `rclone`) |
-| `ADDITIONAL_RCLONE_PARAMETERS` | Extra flags passed to every rclone invocation |
+| `ADDITIONAL_RCLONE_PARAMETERS` | Restricted transport options such as timeouts, retries, and CA certificate configuration |
 
 ## Docker
 
@@ -263,8 +298,8 @@ docker run -v /path/to/db:/data -v /path/to/backups:/backup \
 # Run cloud mode
 docker run -e SEMOSS_STORAGE_PROVIDER=s3 \
   -e S3_REGION=us-east-1 -e S3_BUCKET=mybucket \
-  -e S3_ACCESS_KEY=AKID -e S3_SECRET_KEY=SECRET \
-  h2-migration-service:latest --mode=cloud --backup-dir=/backup
+  h2-migration-service:latest --mode=cloud --backup-dir=/backup \
+  --search-path=semoss-db --dry-run
 ```
 
 ## Architecture
@@ -274,14 +309,18 @@ MigrationConfig         ← CLI/env/properties parsing
     ↓
 H2MigrationService      ← Orchestrator
     ├── DatabaseDiscovery       ← Local file scan
-    ├── CloudDatabaseDiscovery  ← RClone-based cloud scan
+    ├── CloudDatabaseDiscovery  ← Provider-neutral cloud scan
+    ├── CloudStorageLayout      ← Provider-aware SEMOSS scope mapping
+    ├── CloudMigrationCoordinator ← Scope backup/candidate/promotion/rollback
     ├── H2VersionDetector       ← Skip already-migrated DBs
     ├── SmssCredentialReader    ← Read DB credentials from .smss
     ├── BackupManager           ← Backup/restore
     ├── IsolatedH2Driver        ← Classloader isolation
     │   ├── DatabaseExporter    ← SCRIPT TO (H2 1.4.200)
     │   └── DatabaseImporter    ← RUNSCRIPT FROM (H2 2.4.240)
-    ├── RCloneClient            ← Cloud storage operations
+    ├── CloudObjectStore        ← Provider-neutral storage operations
+    │   ├── RCloneClient        ← S3, MinIO, Azure, and optional GCS transport
+    │   └── GcloudStorageClient ← GCS-specific gcloud storage transport
     └── MigrationReport         ← JSON report output
 ```
 
@@ -339,7 +378,10 @@ Each node has its own `db/` directory (e.g. separate Docker volumes). Run the mi
 
 ### Cloud-Enabled Cluster (`SEMOSS_IS_CLUSTER=true`)
 
-Semoss cloud clusters store **only user/client engine databases** in cloud storage (S3/MinIO/Azure/GCS). System databases (security, scheduler, LocalMasterDatabase, UserTrackingDatabase, Notification, etc.) are **not tracked in cloud storage** — they exist only on each pod's local filesystem and are synced through the container image or volume mounts.
+Semoss cloud clusters can store durable user-engine and project databases in
+cloud storage (S3/MinIO/Azure/GCS). System databases (security, scheduler,
+LocalMasterDatabase, UserTrackingDatabase, Notification, etc.) are not cloud
+migration targets; migrate any local system H2 files with local mode.
 
 This means cloud migration requires **two steps**:
 
@@ -351,8 +393,8 @@ This means cloud migration requires **two steps**:
      --semoss-storage-provider=s3 \
      --s3-region=us-east-1 \
      --s3-bucket=my-semoss-bucket \
-     --s3-access-key=AKID \
-     --s3-secret-key=SECRET
+     --search-path=semoss-db \
+     --confirm-semoss-stopped
    ```
 
 2. **Local mode on each pod** — migrate system databases that only exist locally:
@@ -367,7 +409,8 @@ This means cloud migration requires **two steps**:
 Full procedure:
 
 1. Stop all Semoss pods
-2. Run `--mode=cloud` once to migrate user engines in the bucket
+2. Run separate cloud passes for `semoss-db` and `semoss-project` as applicable;
+   each actual pass requires `--confirm-semoss-stopped`
 3. Run `--mode=local` on each pod to migrate system databases
 4. Upgrade all pods to the Semoss version built against H2 2.x
 5. Start all pods — each will pull the migrated user engines from cloud storage on boot
