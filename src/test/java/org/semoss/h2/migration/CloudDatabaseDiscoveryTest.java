@@ -18,7 +18,8 @@ class CloudDatabaseDiscoveryTest {
         MigrationConfig config = buildCloudConfig("s3");
         RCloneClient client = RCloneClient.fromConfig(config);
 
-        CloudDatabaseDiscovery discovery = new CloudDatabaseDiscovery(client, staging);
+        CloudDatabaseDiscovery discovery = new CloudDatabaseDiscovery(
+                client, CloudStorageLayout.fromConfig(config), staging);
         assertEquals(staging, discovery.getStagingDir());
     }
 
@@ -35,7 +36,7 @@ class CloudDatabaseDiscoveryTest {
                 provider.equals("s3") ? "secret" : "",
                 provider.equals("azure_blob") ? "account" : "",
                 provider.equals("azure_blob") ? "key" : "",
-                "", false, false,
+                "", false,
                 provider.equals("gcs") ? "/sa.json" : "",
                 provider.equals("gcs") ? "gcsbucket" : "",
                 provider.equals("gcs") ? "us-central1" : "",
@@ -44,7 +45,7 @@ class CloudDatabaseDiscoveryTest {
                 provider.equals("minio") ? "mkey" : "",
                 provider.equals("minio") ? "msecret" : "",
                 provider.equals("minio") ? "minio-bucket" : "",
-                "rclone", "", ""
+                "rclone", "", provider.equals("azure_blob") ? "db-engine" : "semoss-db"
         );
     }
 }

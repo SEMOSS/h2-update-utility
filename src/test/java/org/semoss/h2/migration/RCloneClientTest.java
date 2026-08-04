@@ -21,11 +21,11 @@ class RCloneClientTest {
                 tempDir.resolve("backup"),
                 false, "sa", "",
                 "s3", "us-east-1", "mybucket", "AKID", "SECRET",
-                "", "", "", false, false,
+                "", "", "", false,
                 "", "", "",
                 "", "", "", "",
                 "",
-                "rclone", "", ""
+                "rclone", "", "semoss-db"
         );
 
         RCloneClient client = RCloneClient.fromConfig(config);
@@ -40,11 +40,11 @@ class RCloneClientTest {
                 tempDir.resolve("backup"),
                 false, "sa", "",
                 "azure_blob", "", "", "", "",
-                "myaccount", "mykey", "", false, false,
+                "myaccount", "mykey", "", false,
                 "", "", "",
                 "", "", "", "",
                 "",
-                "rclone", "", ""
+                "rclone", "", "db-engine"
         );
 
         RCloneClient client = RCloneClient.fromConfig(config);
@@ -59,11 +59,11 @@ class RCloneClientTest {
                 tempDir.resolve("backup"),
                 false, "sa", "",
                 "gcs", "", "", "", "",
-                "", "", "", false, false,
+                "", "", "", false,
                 "/path/to/sa.json", "gcsbucket", "us-central1",
                 "", "", "", "",
                 "",
-                "rclone", "", ""
+                "rclone", "", "semoss-db"
         );
 
         RCloneClient client = RCloneClient.fromConfig(config);
@@ -78,11 +78,11 @@ class RCloneClientTest {
                 tempDir.resolve("backup"),
                 false, "sa", "",
                 "minio", "", "", "", "",
-                "", "", "", false, false,
+                "", "", "", false,
                 "", "", "",
                 "http://localhost:9000", "us-east-1", "minio-key", "minio-secret",
                 "minio-bucket",
-                "rclone", "", ""
+                "rclone", "", "semoss-db"
         );
 
         RCloneClient client = RCloneClient.fromConfig(config);
@@ -93,15 +93,15 @@ class RCloneClientTest {
     void fromConfig_localFileSystem_builds() {
         MigrationConfig config = new MigrationConfig(
                 MigrationConfig.MigrationMode.CLOUD,
-                null,
+                tempDir,
                 tempDir.resolve("backup"),
                 false, "sa", "",
                 "local_file_system", "", "", "", "",
-                "", "", "", false, false,
+                "", "", "", false,
                 "", "", "",
                 "", "", "", "",
                 "",
-                "rclone", "", ""
+                "rclone", "", "semoss-db"
         );
 
         RCloneClient client = RCloneClient.fromConfig(config);
@@ -116,7 +116,7 @@ class RCloneClientTest {
                 tempDir.resolve("backup"),
                 false, "sa", "",
                 "dropbox", "", "", "", "",
-                "", "", "", false, false,
+                "", "", "", false,
                 "", "", "",
                 "", "", "", "",
                 "",

@@ -54,7 +54,7 @@ class LocalMigrationIT {
                 scanDir, backupDir,
                 false, "sa", "",
                 "", "", "", "", "",
-                "", "", "", false, false,
+                "", "", "", false,
                 "", "", "",
                 "", "", "", "",
                 "",
