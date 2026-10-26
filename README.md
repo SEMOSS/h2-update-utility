@@ -26,8 +26,11 @@ SEMOSS target class fail closed instead of being opened with guessed credentials
   borrowing a neighboring project/engine `.smss`
 - **Backend-aware primary handling**: User-engine files require a confirmed H2
   `.smss`; base system files whose active `.smss` is confirmed PostgreSQL or
-  SQLite are reported and intentionally skipped. Non-H2 credentials are never
-  used to open a physical H2 file
+  SQLite have their retained H2 file migrated with the default system
+  credentials (`--default-user`/`--default-password`), and the non-H2 `.smss` is
+  left unchanged. If the defaults cannot open the file it is reported as
+  `SKIPPED` and left untouched. Non-H2 credentials are never used to open a
+  physical H2 file
 - **Version detection**: Skips databases already in H2 2.x format (MVStore format ≥ 2)
 - **Dry-run support**: Preview what would be migrated without changes
 - **JSON report**: Writes a migration report with per-database status, sorted by outcome
