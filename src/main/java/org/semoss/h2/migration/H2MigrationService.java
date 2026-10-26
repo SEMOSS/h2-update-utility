@@ -252,7 +252,14 @@ public class H2MigrationService {
 
         } catch (Exception e) {
             LOGGER.warn("Failed to migrate " + dbFile, e);
-            if (result == null) {
+            if (result != null && "export".equals(stage)
+                    && target.credentialSource() == DatabaseTarget.CredentialSource.RETAINED_SYSTEM_DEFAULT) {
+                // retained file not in use and not openable with defaults: leave it untouched
+                result.status(Status.SKIPPED)
+                        .reason("Retained H2 file could not be exported with default credentials; left unchanged: "
+                                + e.getMessage())
+                        .durationMs(System.currentTimeMillis() - start);
+            } else if (result == null) {
                 result = report.addResult(target, Status.FAILED,
                         stage + " failed: " + e.getMessage(), System.currentTimeMillis() - start);
             } else {

@@ -46,6 +46,7 @@ public record DatabaseTarget(
         UNRESOLVED,
         H2_SMSS,
         H2_FALLBACK_SMSS,
+        RETAINED_SYSTEM_DEFAULT,
         GENERATED_AUDIT_RUNTIME,
         GENERATED_PROJECT_INSIGHTS_RUNTIME,
         H2_FRAME_RUNTIME,
