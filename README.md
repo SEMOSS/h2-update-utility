@@ -26,8 +26,11 @@ SEMOSS target class fail closed instead of being opened with guessed credentials
   borrowing a neighboring project/engine `.smss`
 - **Backend-aware primary handling**: User-engine files require a confirmed H2
   `.smss`; base system files whose active `.smss` is confirmed PostgreSQL or
-  SQLite are reported and intentionally skipped. Non-H2 credentials are never
-  used to open a physical H2 file
+  SQLite have their retained H2 file migrated with the default system
+  credentials (`--default-user`/`--default-password`), and the non-H2 `.smss` is
+  left unchanged. If the defaults cannot open the file it is reported as
+  `SKIPPED` and left untouched. Non-H2 credentials are never used to open a
+  physical H2 file
 - **Version detection**: Skips databases already in H2 2.x format (MVStore format ≥ 2)
 - **Dry-run support**: Preview what would be migrated without changes
 - **JSON report**: Writes a migration report with per-database status, sorted by outcome
@@ -49,6 +52,9 @@ Produces `target/h2-migration-service.jar` — a fat JAR containing both H2 vers
 ## Usage + Testing
 
 ### Local Mode
+
+For a step-by-step local upgrade (including one driven by an AI assistant),
+follow the [Local upgrade runbook](docs/local-upgrade-runbook.md).
 
 ```bash
 java -jar target/h2-migration-service.jar \
@@ -287,23 +293,66 @@ All CLI flags can be set via environment variables (matching Semoss conventions)
 | `RCLONE` | Path to rclone binary (default: `rclone`) |
 | `ADDITIONAL_RCLONE_PARAMETERS` | Restricted transport options such as timeouts, retries, and CA certificate configuration |
 
-## Docker
+## Docker and Kubernetes (cloud mode)
+
+The container image is meant for cloud mode: a Kubernetes Job that migrates the
+H2 objects in remote storage before the 6.0.0 rollout. For a local SEMOSS home,
+use the JAR directly; see [Local upgrade runbook](docs/local-upgrade-runbook.md).
+
+The image pins its base images (`maven:3.9.11-amazoncorretto-21-debian` to build,
+`azul/zulu-openjdk:21.0.11-jre` to run), bundles rclone `v1.74.2` and gcloud
+`577.0.0`, and runs as uid/gid `10001`. Override the bases with
+`--build-arg BUILD_IMAGE=...` / `RUNTIME_IMAGE=...`, keeping both on the Java
+release set by `maven.compiler.release` in `pom.xml` (21). Any Java 21+ runtime
+produces identical files, since the conversion is done by the bundled H2 drivers.
 
 ```bash
-# Build locally
 docker build -t h2-migration-service:latest .
 
-# TODO: instructions to pull from Docker Hub
+# TODO: instructions to pull from the published registry
+```
 
-# Run local mode
-docker run -v /path/to/db:/data -v /path/to/backups:/backup \
-  h2-migration-service:latest --mode=local --db-dir=/data --backup-dir=/backup
+### Kubernetes Job
 
-# Run cloud mode
-docker run -e SEMOSS_STORAGE_PROVIDER=s3 \
-  -e S3_REGION=us-east-1 -e S3_BUCKET=mybucket \
-  h2-migration-service:latest --mode=cloud --backup-dir=/backup \
-  --search-path=semoss-db --dry-run
+Manifests and the step-by-step run order are in [`deploy/k8s/`](deploy/k8s/README.md).
+One Job runs every scope in order (`SCOPES`, default `semoss-db semoss-project`)
+through `/app/migrate-all.sh`:
+
+- Start with `DRY_RUN=true`, read the reports, scale SEMOSS to zero, then rerun
+  with `DRY_RUN=false` and `CONFIRM_SEMOSS_STOPPED=true`.
+- A scratch `emptyDir` at `/work` (a PVC option is commented in `job.yaml`)
+  holds download staging (`java.io.tmpdir`), local backups and one report per
+  scope under `/work/<runId>/<scope>/`. Each report is also printed to the Job
+  log between `=== BEGIN REPORT <scope>` and `=== END REPORT <scope>`. Durable
+  backups live in the bucket under `_semoss-h2-migration/<runId>/backup`
+  (Azure: `semoss-h2-migration`).
+- A dry run checks every scope; a real run stops at the first failed scope.
+  Exit code `1` (Job `Failed`) means at least one target failed.
+- Azure needs `SCOPES` set to every `db-<engineId>` / `project-<projectId>`
+  container.
+
+### Image CI
+
+`.github/workflows/docker-image.yml` runs the unit tests, builds the image,
+smoke-tests it (uid, Java 21 JRE, rclone, gcloud, runner script) and pushes
+`linux/amd64` + `linux/arm64` to `quay.io/semoss/h2-update-utility` (repo
+variable `IMAGE_NAME` overrides). Tags: `vX.Y.Z` git tags push `X.Y.Z`, `X.Y`
+and `latest`; `main` pushes `main` and `main-<sha>`; pull requests build
+without pushing. Needs the `QUAY_ROBOT_USERNAME` / `QUAY_ROBOT_PASSWORD`
+secrets.
+
+### Local volumes with Docker
+
+The image can also migrate a mounted SEMOSS home, though the JAR is the usual
+path. Stop SEMOSS first, mount `db/` at `/data/db` and `project/` at
+`/data/project` (engines are classified by the folder name, so a `db/` mounted
+directly at `/data` reports every user engine as unrecognized), keep the backup
+mount outside the database folder, and run as the owner of the files:
+
+```bash
+docker run --rm --user "$(id -u semoss):$(id -g semoss)" \
+  -v /opt/semosshome/db:/data/db -v /path/to/backups/db:/backup \
+  h2-migration-service:latest --mode=local --db-dir=/data/db --backup-dir=/backup --dry-run
 ```
 
 ## Architecture

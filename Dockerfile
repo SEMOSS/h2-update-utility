@@ -1,18 +1,20 @@
-# Build stage
-FROM azul/zulu-openjdk:21-latest AS build
+# Pinned images; bump both together (pom targets release 21)
+ARG BUILD_IMAGE=maven:3.9.11-amazoncorretto-21-debian
+ARG RUNTIME_IMAGE=azul/zulu-openjdk:21.0.11-jre
+
+# Build stage; the jar is platform independent, so build once on the native platform
+FROM --platform=$BUILDPLATFORM ${BUILD_IMAGE} AS build
 WORKDIR /build
 COPY pom.xml .
 COPY src ./src
-RUN apt-get update && apt-get install -y maven && \
-    mvn clean package -DskipTests -q && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+RUN mvn clean package -DskipTests -q
 
-# Runtime stage
-FROM azul/zulu-openjdk:21-latest
+# Runtime stage (JRE only)
+FROM ${RUNTIME_IMAGE}
 
 LABEL org.opencontainers.image.title="H2 Migration Service"
 LABEL org.opencontainers.image.description="Standalone migration tool for upgrading H2 databases from 1.4.x to 2.x"
-LABEL org.opencontainers.image.source="https://github.com/SEMOSS/h2-migration-service"
+LABEL org.opencontainers.image.source="https://github.com/SEMOSS/h2-update-utility"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 LABEL org.opencontainers.image.vendor="Semoss"
 
@@ -36,17 +38,18 @@ RUN apt-get update && \
     apt-get autoremove -y && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user
-RUN groupadd -r migrator && useradd -r -g migrator -d /app migrator
+# Non-root user with a fixed numeric uid so Kubernetes runAsNonRoot can verify it
+RUN groupadd -r -g 10001 migrator && useradd -r -u 10001 -g migrator -d /app migrator
 
 WORKDIR /app
 COPY --from=build /build/target/h2-migration-service.jar /app/h2-migration-service.jar
+COPY --chmod=755 scripts/migrate-all.sh /app/migrate-all.sh
 
 # Default directories
-RUN mkdir -p /data /backup && chown -R migrator:migrator /app /data /backup
+RUN mkdir -p /data /backup /work && chown -R migrator:migrator /app /data /backup /work
 
-USER migrator
+USER 10001:10001
 
-# Default entrypoint — override CMD or pass args
+# Default entrypoint; override CMD or pass args
 ENTRYPOINT ["java", "-jar", "/app/h2-migration-service.jar"]
 CMD ["--help"]

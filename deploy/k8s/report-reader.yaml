@@ -1,0 +1,27 @@
+# Mounts the work volume after the Job ends so the reports can be copied out:
+#   kubectl cp h2-migration-reports:/work ./h2-migration-work
+apiVersion: v1
+kind: Pod
+metadata:
+  name: h2-migration-reports
+  labels:
+    app.kubernetes.io/name: h2-update-utility
+spec:
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    fsGroup: 10001
+  containers:
+    - name: reader
+      image: quay.io/semoss/h2-update-utility:latest
+      command: ["sleep", "3600"]
+      volumeMounts:
+        - name: work
+          mountPath: /work
+          readOnly: true
+  volumes:
+    - name: work
+      persistentVolumeClaim:
+        claimName: h2-migration-work

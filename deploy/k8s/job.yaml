@@ -1,0 +1,77 @@
+# Migrates every H2 object in remote storage, scope by scope (see scripts/migrate-all.sh).
+# 1. apply as is (DRY_RUN=true) and read the reports
+# 2. scale every SEMOSS deployment that can reach the bucket to 0
+# 3. delete the Job, set DRY_RUN=false and CONFIRM_SEMOSS_STOPPED=true, apply again
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: h2-migration
+  labels:
+    app.kubernetes.io/name: h2-update-utility
+spec:
+  backoffLimit: 0                  # never retry a migration automatically
+  ttlSecondsAfterFinished: 604800  # keep the pod (and its logs) for 7 days
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: h2-update-utility
+    spec:
+      restartPolicy: Never
+      serviceAccountName: semoss   # needs bucket read/write; reuse SEMOSS workload identity
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+      containers:
+        - name: migrate
+          image: quay.io/semoss/h2-update-utility:latest
+          imagePullPolicy: Always
+          command: ["/app/migrate-all.sh"]
+          env:
+            - name: DRY_RUN
+              value: "true"
+            - name: CONFIRM_SEMOSS_STOPPED
+              value: "false"
+            # S3/MinIO/GCS: both prefixes. Azure: list every db-<engineId> and project-<projectId>
+            - name: SCOPES
+              value: "semoss-db semoss-project"
+            - name: WORK_DIR
+              value: /work
+            - name: SEMOSS_STORAGE_PROVIDER
+              value: s3
+            - name: S3_REGION
+              value: us-east-1
+            - name: S3_BUCKET
+              value: my-semoss-bucket
+            - name: JAVA_TOOL_OPTIONS
+              value: "-Xmx4g"
+          envFrom:
+            - secretRef:
+                name: h2-migration-storage
+                optional: true
+          resources:
+            requests:
+              cpu: "1"
+              memory: 5Gi
+              ephemeral-storage: 20Gi  # for the emptyDir work volume; ~3x the largest engine/project
+            limits:
+              memory: 6Gi
+              ephemeral-storage: 30Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: work
+              mountPath: /work
+      volumes:
+        # scratch only (durable backups go to the bucket); deleted with the pod
+        - name: work
+          emptyDir:
+            sizeLimit: 30Gi
+        # to keep reports after the pod, apply pvc.yaml and use this instead
+        # (then drop the ephemeral-storage request/limit above)
+        # - name: work
+        #   persistentVolumeClaim:
+        #     claimName: h2-migration-work

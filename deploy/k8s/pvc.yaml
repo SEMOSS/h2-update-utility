@@ -1,0 +1,14 @@
+# Work volume: cloud staging (java.io.tmpdir), local backups, export scripts, reports.
+# Size for about 3x the largest single engine/project scope; reports stay after the pod ends.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: h2-migration-work
+  labels:
+    app.kubernetes.io/name: h2-update-utility
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 50Gi
+  # storageClassName: gp3
