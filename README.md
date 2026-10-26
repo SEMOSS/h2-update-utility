@@ -320,10 +320,12 @@ through `/app/migrate-all.sh`:
 
 - Start with `DRY_RUN=true`, read the reports, scale SEMOSS to zero, then rerun
   with `DRY_RUN=false` and `CONFIRM_SEMOSS_STOPPED=true`.
-- A scratch `emptyDir` at `/work` (a PVC is commented in `job.yaml`) holds download staging (`java.io.tmpdir`), local backups
-  and one report per scope under `/work/<runId>/<scope>/`. Durable backups live
-  in the bucket under `_semoss-h2-migration/<runId>/backup` (Azure:
-  `semoss-h2-migration`).
+- A scratch `emptyDir` at `/work` (a PVC option is commented in `job.yaml`)
+  holds download staging (`java.io.tmpdir`), local backups and one report per
+  scope under `/work/<runId>/<scope>/`. Each report is also printed to the Job
+  log between `=== BEGIN REPORT <scope>` and `=== END REPORT <scope>`. Durable
+  backups live in the bucket under `_semoss-h2-migration/<runId>/backup`
+  (Azure: `semoss-h2-migration`).
 - A dry run checks every scope; a real run stops at the first failed scope.
   Exit code `1` (Job `Failed`) means at least one target failed.
 - Azure needs `SCOPES` set to every `db-<engineId>` / `project-<projectId>`

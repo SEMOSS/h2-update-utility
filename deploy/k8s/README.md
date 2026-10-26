@@ -9,7 +9,7 @@ One Job runs every scope in order (`semoss-db`, then `semoss-project`) through
 | `pvc.yaml` | Optional: keeps `/work` (and the reports) after the pod; `job.yaml` defaults to an `emptyDir` |
 | `secret.example.yaml` | Storage keys, only when the pod has no workload identity |
 | `job.yaml` | The migration Job (dry run by default) |
-| `report-reader.yaml` | Pod that mounts the work volume after the Job so reports can be copied out |
+| `report-reader.yaml` | PVC option only: mounts `/work` after the Job so report files can be copied out |
 
 ## Before you start
 
@@ -36,16 +36,20 @@ NS=semoss
 # 1. dry run (SEMOSS can stay up; nothing in the bucket is changed)
 kubectl -n $NS apply -f job.yaml
 kubectl -n $NS logs -f job/h2-migration
-kubectl -n $NS delete job h2-migration
 
-# 2. read the reports
-kubectl -n $NS apply -f report-reader.yaml
-kubectl -n $NS wait --for=condition=ready pod/h2-migration-reports
-kubectl -n $NS cp h2-migration-reports:/work ./h2-migration-work
-kubectl -n $NS delete pod h2-migration-reports
+# 2. save the log; each scope's JSON report is printed between
+#    "=== BEGIN REPORT <scope>" and "=== END REPORT <scope>"
+kubectl -n $NS logs job/h2-migration > h2-migration-dryrun.log
+sed -n '/^=== BEGIN REPORT semoss-db$/,/^=== END REPORT/p' h2-migration-dryrun.log \
+  | sed '1d;$d' > semoss-db-report.json
 ```
 
-Each `<runId>/<scope>/migration-report.json` should show only `SKIPPED` rows
+Save the log before deleting the Job: the default `emptyDir` work volume (and
+the report files on it) is deleted with the pod. With the PVC option, the files
+stay under `/work/<runId>/<scope>/` and `report-reader.yaml` mounts them for
+`kubectl cp`.
+
+Each scope's report should show only `SKIPPED` rows
 with "Dry run - would migrate" or "Already H2 2.x". Fix any `FAILED` row first.
 
 ```bash
@@ -53,13 +57,15 @@ with "Dry run - would migrate" or "Already H2 2.x". Fix any `FAILED` row first.
 kubectl -n $NS scale deploy/<semoss> --replicas=0
 
 # 4. real run: in job.yaml set DRY_RUN "false" and CONFIRM_SEMOSS_STOPPED "true"
+kubectl -n $NS delete job h2-migration
 kubectl -n $NS apply -f job.yaml
 kubectl -n $NS logs -f job/h2-migration
+kubectl -n $NS logs job/h2-migration > h2-migration-run.log
 ```
 
 The log ends with `finished with exit 0` when every scope succeeded. A real run
 stops at the first failed scope and the Job shows `Failed`; read its report,
-fix the cause, delete the Job and apply it again (migrated files are skipped).
+fix the cause, save the log, delete the Job and apply it again (migrated files are skipped).
 Then roll out SEMOSS 6.0.0 and scale it back up.
 
 ## Rollback
@@ -69,10 +75,3 @@ before promotion, and a failed promotion restores its scope automatically. To
 undo a finished run, stop SEMOSS, copy the backup objects back over the
 originals with your provider's tooling, and start the previous SEMOSS version.
 Backups are never deleted by the utility.
-
-## Tested
-
-Against a local minikube cluster with an S3-compatible bucket (MinIO provider
-settings), seeded with two engines and one project in 1.4 format: dry run
-reported 5 "would migrate"; real run migrated 5/5 to format 3 with format 1
-backups under `_semoss-h2-migration/`; a re-run skipped all 5.
