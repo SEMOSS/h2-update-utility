@@ -30,6 +30,8 @@ class MigrationConfigTest {
         assertEquals("sa", config.defaultUsername());
         assertEquals("", config.defaultPassword());
         assertEquals("rclone", config.rclonePath());
+        assertEquals("rclone", config.gcsTransferBackend());
+        assertEquals("gcloud", config.gcloudPath());
     }
 
     @Test
@@ -68,6 +70,22 @@ class MigrationConfigTest {
         assertEquals("my-bucket", config.s3Bucket());
         assertEquals("AKID", config.s3AccessKey());
         assertEquals("secret", config.s3SecretKey());
+    }
+
+    @Test
+    void fromArgs_gcsTransferBackendAndExecutable() {
+        MigrationConfig config = MigrationConfig.fromArgs(new String[] {
+                "--mode=cloud",
+                "--semoss-storage-provider=gcs",
+                "--gcs-bucket=my-bucket",
+                "--gcs-transfer-backend=gcloud",
+                "--gcloud=/opt/google-cloud-sdk/bin/gcloud",
+                "--search-path=semoss-db",
+                "--dry-run"
+        });
+
+        assertEquals("gcloud", config.gcsTransferBackend());
+        assertEquals("/opt/google-cloud-sdk/bin/gcloud", config.gcloudPath());
     }
 
     @Test

@@ -54,7 +54,7 @@ class LocalMigrationIT {
                 scanDir, backupDir,
                 false, "sa", "",
                 "", "", "", "", "",
-                "", "", "", false, false,
+                "", "", "", false,
                 "", "", "",
                 "", "", "", "",
                 "",
@@ -74,7 +74,7 @@ class LocalMigrationIT {
                 DRIVER\torg.h2.Driver
                 USERNAME\t%s
                 PASSWORD\t%s
-                CONNECTION_URL\tjdbc:h2:nio:@BaseFolder@/%s;query_timeout=180000;early_filter=true;query_cache_size=24;cache_size=32768
+                CONNECTION_URL\tjdbc:h2:nio:@BaseFolder@/%s;query_timeout=180000;cache_size=32768
                 """.formatted(engineId, engineAlias, engineAlias, username, password, dbRelPath);
         Files.writeString(smssFile, content);
     }
@@ -356,6 +356,8 @@ class LocalMigrationIT {
         Path secDir = dbDir.resolve("security");
         Files.createDirectories(secDir);
         String secDbPath = secDir.resolve("security").toAbsolutePath().toString();
+        writeSmss(dbDir.resolve("security.smss"), "security", "security",
+                "sa", "", "db/security/security");
 
         try (IsolatedH2Driver h2 = IsolatedH2Driver.load("1.4.200")) {
             try (Connection conn = h2.connect("jdbc:h2:" + secDbPath, "sa", "");
@@ -494,6 +496,8 @@ class LocalMigrationIT {
         Path schedDir = dbDir.resolve("scheduler");
         Files.createDirectories(schedDir);
         String schedDbPath = schedDir.resolve("scheduler").toAbsolutePath().toString();
+        writeSmss(dbDir.resolve("scheduler.smss"), "scheduler", "scheduler",
+                "sa", "", "db/scheduler/scheduler");
 
         try (IsolatedH2Driver h2 = IsolatedH2Driver.load("1.4.200")) {
             try (Connection conn = h2.connect("jdbc:h2:" + schedDbPath, "sa", "");
@@ -1043,6 +1047,8 @@ class LocalMigrationIT {
         Path encDir = dbDir.resolve("encrypted");
         Files.createDirectories(encDir);
         Path encFile = encDir.resolve("cipher.mv.db");
+        writeSmss(dbDir.resolve("encrypted.smss"), "encrypted", "encrypted",
+                "sa", "", "db/encrypted/cipher");
 
         // High-entropy "ciphertext" — no printable MVStore header possible
         byte[] cipher = new byte[512];
@@ -1133,6 +1139,8 @@ class LocalMigrationIT {
         Path psDir = dbDir.resolve("pagestore");
         Files.createDirectories(psDir);
         String base = psDir.resolve("legacy").toAbsolutePath().toString();
+        writeSmss(dbDir.resolve("pagestore.smss"), "pagestore", "pagestore",
+                "sa", "", "db/pagestore/legacy");
 
         try (IsolatedH2Driver h2 = IsolatedH2Driver.load("1.4.200")) {
             try (Connection conn = h2.connect("jdbc:h2:" + base + ";MV_STORE=FALSE", "sa", "");

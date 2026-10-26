@@ -6,7 +6,7 @@
 
     <groupId>org.semoss</groupId>
     <artifactId>h2-migration-service</artifactId>
-    <version>1.0.0-SNAPSHOT</version>
+    <version>1.2.0-SNAPSHOT</version>
     <packaging>jar</packaging>
 
     <name>H2 Migration Service</name>

@@ -26,7 +26,6 @@ public record MigrationConfig(
         String azPrimaryKey,
         String azConnString,
         boolean azUseMsi,
-        boolean azGenerateDynamicSas,
         String gcsServiceAccountFile,
         String gcsBucket,
         String gcsRegion,
@@ -37,7 +36,12 @@ public record MigrationConfig(
         String minioBucket,
         String rclonePath,
         String additionalRcloneParams,
-        String searchPath
+        String searchPath,
+        boolean confirmSemossStopped,
+        String s3SessionToken,
+        String gcsServiceAccountJson,
+        String gcsTransferBackend,
+        String gcloudPath
 ) {
 
     public enum MigrationMode {
@@ -47,6 +51,29 @@ public record MigrationConfig(
     public static final String DEFAULT_USERNAME = "sa";
     public static final String DEFAULT_PASSWORD = "";
     public static final String DEFAULT_RCLONE = "rclone";
+    public static final String DEFAULT_GCS_TRANSFER_BACKEND = "rclone";
+    public static final String DEFAULT_GCLOUD = "gcloud";
+
+    /** Backward-compatible constructor for existing callers and fixtures. */
+    public MigrationConfig(
+            MigrationMode mode, Path dbDir, Path backupDir, boolean dryRun,
+            String defaultUsername, String defaultPassword, String storageProvider,
+            String s3Region, String s3Bucket, String s3AccessKey, String s3SecretKey,
+            String azAccountName, String azPrimaryKey, String azConnString,
+            boolean azUseMsi,
+            String gcsServiceAccountFile, String gcsBucket, String gcsRegion,
+            String minioEndpoint, String minioRegion, String minioAccessKey,
+            String minioSecretKey, String minioBucket, String rclonePath,
+            String additionalRcloneParams, String searchPath) {
+        this(mode, dbDir, backupDir, dryRun, defaultUsername, defaultPassword,
+                storageProvider, s3Region, s3Bucket, s3AccessKey, s3SecretKey,
+                azAccountName, azPrimaryKey, azConnString, azUseMsi,
+                gcsServiceAccountFile, gcsBucket, gcsRegion,
+                minioEndpoint, minioRegion, minioAccessKey, minioSecretKey,
+                minioBucket, rclonePath, additionalRcloneParams, searchPath,
+                false, "", "",
+                DEFAULT_GCS_TRANSFER_BACKEND, DEFAULT_GCLOUD);
+    }
 
     /**
      * Build config by layering: defaults → properties file → env vars → CLI args.
@@ -94,14 +121,15 @@ public record MigrationConfig(
                 "MODE", "DB_DIR", "BACKUP_DIR", "DRY_RUN",
                 "DEFAULT_USER", "DEFAULT_PASSWORD",
                 "SEMOSS_STORAGE_PROVIDER",
-                "S3_REGION", "S3_BUCKET", "S3_ACCESS_KEY", "S3_SECRET_KEY",
+                "S3_REGION", "S3_BUCKET", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_SESSION_TOKEN",
                 "AZ_ACCOUNT_NAME", "AZ_PRIMARY_KEY", "AZ_CONN_STRING",
-                "AZ_USE_MSI", "AZ_GENERATE_DYNAMIC_SAS",
-                "GCS_SERVICE_ACCOUNT_FILE", "GCS_BUCKET", "GCS_REGION",
+                "AZ_USE_MSI",
+                "GCS_SERVICE_ACCOUNT_FILE", "GCS_SERVICE_ACCOUNT_JSON", "GCS_BUCKET", "GCS_REGION",
+                "GCS_TRANSFER_BACKEND", "GCLOUD",
                 "MINIO_ENDPOINT", "MINIO_REGION", "MINIO_ACCESS_KEY", "MINIO_SECRET_KEY",
                 "MINIO_BUCKET",
                 "RCLONE", "ADDITIONAL_RCLONE_PARAMETERS",
-                "SEARCH_PATH"
+                "SEARCH_PATH", "CONFIRM_SEMOSS_STOPPED"
         };
         for (String key : envKeys) {
             String val = System.getenv(key);
@@ -156,7 +184,6 @@ public record MigrationConfig(
                 p.getProperty("AZ_PRIMARY_KEY", ""),
                 p.getProperty("AZ_CONN_STRING", ""),
                 bool(p, "AZ_USE_MSI"),
-                bool(p, "AZ_GENERATE_DYNAMIC_SAS"),
                 p.getProperty("GCS_SERVICE_ACCOUNT_FILE", ""),
                 p.getProperty("GCS_BUCKET", ""),
                 p.getProperty("GCS_REGION", ""),
@@ -167,12 +194,30 @@ public record MigrationConfig(
                 p.getProperty("MINIO_BUCKET", ""),
                 p.getProperty("RCLONE", DEFAULT_RCLONE),
                 p.getProperty("ADDITIONAL_RCLONE_PARAMETERS", ""),
-                p.getProperty("SEARCH_PATH", "")
+                p.getProperty("SEARCH_PATH", ""),
+                bool(p, "CONFIRM_SEMOSS_STOPPED"),
+                p.getProperty("S3_SESSION_TOKEN", ""),
+                p.getProperty("GCS_SERVICE_ACCOUNT_JSON", ""),
+                p.getProperty("GCS_TRANSFER_BACKEND", DEFAULT_GCS_TRANSFER_BACKEND),
+                p.getProperty("GCLOUD", DEFAULT_GCLOUD)
         );
     }
 
     private static boolean bool(Properties p, String key) {
         return "true".equalsIgnoreCase(p.getProperty(key, "false"));
+    }
+
+    @Override
+    public String toString() {
+        return "MigrationConfig[mode=" + mode
+                + ", dbDir=" + dbDir
+                + ", backupDir=" + backupDir
+                + ", dryRun=" + dryRun
+                + ", storageProvider=" + storageProvider
+                + ", gcsTransferBackend=" + gcsTransferBackend
+                + ", searchPath=" + searchPath
+                + ", confirmSemossStopped=" + confirmSemossStopped
+                + ", cloudCredentials=<redacted>]";
     }
 
     public static String usage() {
@@ -181,7 +226,7 @@ public record MigrationConfig(
 
                 Modes:
                   --mode=local             Migrate local H2 databases (default)
-                  --mode=cloud             Migrate H2 databases in cloud storage via RClone
+                  --mode=cloud             Migrate H2 databases in cloud storage
 
                 Local options:
                   --db-dir=PATH            Root directory containing H2 databases (required for local)
@@ -192,16 +237,21 @@ public record MigrationConfig(
                   --dry-run                Discover databases and report without migrating
                   --default-user=USER      Fallback H2 username (default: sa)
                   --default-password=PWD   Fallback H2 password (default: empty)
-                  --search-path=PATH       Subdirectory within the storage root to search (default: root)
+                  --search-path=PATH       Required recognized SEMOSS cloud scope
 
                 Cloud storage (env vars or CLI flags):
                   --semoss-storage-provider=PROVIDER   s3, azure, gcs, minio, local_file_system
                   --s3-region=REGION       --s3-bucket=BUCKET   --s3-access-key=KEY   --s3-secret-key=SECRET
                   --az-account-name=NAME   --az-primary-key=KEY --az-use-msi          --az-conn-string=STR
                   --gcs-service-account-file=PATH      --gcs-bucket=BUCKET   --gcs-region=REGION
+                  --gcs-transfer-backend=BACKEND       rclone (default) or gcloud
+                  --gcloud=PATH          Path to gcloud binary (default: gcloud)
                   --minio-endpoint=URL     --minio-region=REGION --minio-access-key=KEY --minio-secret-key=SECRET
                   --minio-bucket=BUCKET
                   --rclone=PATH            Path to rclone binary (default: rclone)
+                  --confirm-semoss-stopped Required for a non-dry-run cloud migration
+                  --s3-session-token=TOKEN Optional temporary AWS session token
+                  --gcs-service-account-json=JSON     Optional injected GCP service-account JSON
                 """;
     }
 }

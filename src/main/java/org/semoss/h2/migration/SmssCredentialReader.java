@@ -3,7 +3,14 @@ package org.semoss.h2.migration;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -24,7 +31,23 @@ public final class SmssCredentialReader {
 
     private SmssCredentialReader() {}
 
-    public record Credentials(String username, String password) {}
+    public record Credentials(String username, String password) {
+        @Override
+        public String toString() {
+            return "Credentials[username=" + username + ", password=<redacted>]";
+        }
+    }
+
+    /** Parsed non-secret connection metadata plus the credentials used for migration. */
+    public record SmssMetadata(
+            Path path,
+            Credentials credentials,
+            String backend,
+            boolean confirmedH2,
+            String connectionUrl,
+            String rdbmsType,
+            String driver
+    ) {}
 
     /**
      * Locate the {@code .smss} file adjacent to the given database file and
@@ -54,34 +77,50 @@ public final class SmssCredentialReader {
      * Look for an .smss file using Semoss's naming conventions.
      */
     static Path findSmssFile(Path dbFile) {
-        Path parent = dbFile.getParent();
-        if (parent == null) return null;
+        List<Path> candidates = findSmssFiles(dbFile);
+        return candidates.isEmpty() ? null : candidates.get(0);
+    }
 
-        // Pattern 1: .smss file in the parent's parent directory named after the folder
-        // e.g. db/themes/database.mv.db → db/themes.smss
+    /**
+     * Return every nearby SMSS candidate in deterministic preference order.
+     * H2-specific fallback profiles are considered before the primary profile.
+     */
+    static List<Path> findSmssFiles(Path dbFile) {
+        Path parent = dbFile.getParent();
+        if (parent == null) return List.of();
+
+        Set<Path> candidates = new LinkedHashSet<>();
+
         Path grandParent = parent.getParent();
         if (grandParent != null) {
             String folderName = parent.getFileName().toString();
-            Path candidate = grandParent.resolve(folderName + ".smss");
-            if (Files.isRegularFile(candidate)) {
-                return candidate;
-            }
+            addIfRegular(candidates, grandParent.resolve(folderName + "_h2.smss"));
+            addIfRegular(candidates, grandParent.resolve(folderName + ".smss"));
 
-            // Pattern 2: folder name might have alias__uuid format
-            // e.g. db/AnimalDb__uuid/database.mv.db → db/AnimalDb__uuid.smss
-            // Already covered by pattern 1 since folderName = "AnimalDb__uuid"
+            // Some local SEMOSS engines keep their profiles in db/SMSS rather
+            // than adjacent to the engine directory (for example,
+            // db/form_builder_engine with db/SMSS/form_builder_engine.smss).
+            Path smssDirectory = grandParent.resolve("SMSS");
+            addIfRegular(candidates, smssDirectory.resolve(folderName + "_h2.smss"));
+            addIfRegular(candidates, smssDirectory.resolve(folderName + ".smss"));
         }
 
-        // Pattern 3: .smss file in the same directory as the db file
         try (var stream = Files.list(parent)) {
-            return stream
+            List<Path> local = stream
                     .filter(p -> p.toString().toLowerCase().endsWith(".smss"))
-                    .findFirst()
-                    .orElse(null);
+                    .sorted(Comparator
+                            .comparing((Path p) -> !p.getFileName().toString().toLowerCase().contains("_h2.smss"))
+                            .thenComparing(p -> p.getFileName().toString().toLowerCase()))
+                    .toList();
+            candidates.addAll(local);
         } catch (IOException e) {
             LOGGER.warn("Error listing directory for .smss: " + parent, e);
-            return null;
         }
+        return List.copyOf(candidates);
+    }
+
+    private static void addIfRegular(Set<Path> candidates, Path candidate) {
+        if (Files.isRegularFile(candidate)) candidates.add(candidate.toAbsolutePath().normalize());
     }
 
     /**
@@ -116,5 +155,70 @@ public final class SmssCredentialReader {
 
         LOGGER.debug("Credentials from " + smssFile + ": user=" + username);
         return new Credentials(username, password);
+    }
+
+    /**
+     * Parse credentials and backend indicators from an SMSS file. An explicit
+     * blank PASSWORD is preserved as the empty H2 password.
+     */
+    static SmssMetadata readMetadata(Path smssFile, String fallbackUser, String fallbackPass) {
+        Map<String, String> values = new LinkedHashMap<>();
+        try {
+            for (String line : Files.readAllLines(smssFile)) {
+                String trimmed = line.trim();
+                if (trimmed.isEmpty() || trimmed.startsWith("#")) continue;
+                String[] parts = trimmed.split("\\s+", 2);
+                String key = parts[0].toUpperCase(Locale.ROOT);
+                String value = parts.length > 1 ? parts[1].trim() : "";
+                values.put(key, value);
+            }
+        } catch (IOException e) {
+            LOGGER.warn("Error reading .smss file: " + smssFile, e);
+        }
+
+        String username = values.getOrDefault("USERNAME", fallbackUser);
+        if (username == null || username.isBlank()) username = fallbackUser;
+        String password = values.containsKey("PASSWORD") ? values.get("PASSWORD") : fallbackPass;
+        String rdbmsType = firstNonBlank(values.get("RDBMS_TYPE"), values.get("DBMS_TYPE"));
+        String driver = values.getOrDefault("DRIVER", "");
+        String connectionUrl = values.getOrDefault("CONNECTION_URL", "");
+        String backend = detectBackend(rdbmsType, driver, connectionUrl);
+
+        return new SmssMetadata(
+                smssFile.toAbsolutePath().normalize(),
+                new Credentials(username, password == null ? "" : password),
+                backend,
+                "H2".equals(backend),
+                connectionUrl,
+                rdbmsType,
+                driver);
+    }
+
+    private static String detectBackend(String rdbmsType, String driver, String connectionUrl) {
+        Set<String> indicators = new LinkedHashSet<>();
+        addBackendIndicator(indicators, rdbmsType);
+        addBackendIndicator(indicators, driver);
+        addBackendIndicator(indicators, connectionUrl);
+        if (indicators.isEmpty()) return "UNKNOWN";
+        if (indicators.size() == 1) return indicators.iterator().next();
+        return "CONFLICTING:" + String.join(",", new ArrayList<>(indicators));
+    }
+
+    private static void addBackendIndicator(Set<String> indicators, String value) {
+        if (value == null || value.isBlank()) return;
+        String lower = value.toLowerCase(Locale.ROOT);
+        if (lower.contains("postgres")) {
+            indicators.add("POSTGRES");
+        } else if (lower.contains("sqlite")) {
+            indicators.add("SQLITE");
+        } else if (lower.contains("h2_db") || lower.contains("org.h2")
+                || lower.startsWith("jdbc:h2:") || "h2".equals(lower)) {
+            indicators.add("H2");
+        }
+    }
+
+    private static String firstNonBlank(String first, String second) {
+        if (first != null && !first.isBlank()) return first;
+        return second == null ? "" : second;
     }
 }

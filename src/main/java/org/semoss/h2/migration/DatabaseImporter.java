@@ -113,7 +113,18 @@ public final class DatabaseImporter {
      * on success; throws on failure so the caller can record context and restore backup.
      */
     public void smokeOpen(Path dbFile, String username, String password) throws SQLException {
-        String url = buildTargetUrl(dbFile);
+        smokeOpenUrl(buildTargetUrl(dbFile), username, password);
+    }
+
+    /** Open through the target's actual SEMOSS runtime-style H2 URL. */
+    public void smokeOpenRuntime(DatabaseTarget target) throws SQLException {
+        if (target.runtimeUrl() == null || target.credentials() == null) {
+            throw new SQLException("Target does not have a resolved runtime connection profile");
+        }
+        smokeOpenUrl(target.runtimeUrl(), target.credentials().username(), target.credentials().password());
+    }
+
+    private void smokeOpenUrl(String url, String username, String password) throws SQLException {
         try (Connection conn = driver.connect(url, username, password);
              Statement stmt = conn.createStatement()) {
             try (var rs = stmt.executeQuery("SELECT 1")) {

@@ -36,6 +36,19 @@ public final class DatabaseExporter {
      */
     public Path export(Path dbFile, String username, String password) throws SQLException, IOException {
         Path scriptFile = dbFile.resolveSibling(dbFile.getFileName().toString().replace(".mv.db", "") + "_export.sql");
+        return export(dbFile, scriptFile, username, password);
+    }
+
+    /**
+     * Export to an explicit work/backup location so migration never creates
+     * temporary SQL files beside SEMOSS project assets.
+     */
+    public Path export(Path dbFile, Path scriptFile, String username, String password)
+            throws SQLException, IOException {
+        Path normalizedScript = scriptFile.toAbsolutePath().normalize();
+        if (normalizedScript.getParent() != null) {
+            Files.createDirectories(normalizedScript.getParent());
+        }
 
         String dbPath = stripExtension(dbFile);
         // Use ;ACCESS_MODE_DATA=r to open in read-only mode, preventing lock conflicts
@@ -46,12 +59,13 @@ public final class DatabaseExporter {
         try (Connection conn = driver.connect(url, username, password);
              Statement stmt = conn.createStatement()) {
             // SCRIPT TO exports all DDL and DML to a SQL file
-            stmt.execute("SCRIPT TO '" + scriptFile.toAbsolutePath().toString().replace("'", "''") + "'");
+            stmt.execute("SCRIPT TO '" + normalizedScript.toString().replace("'", "''") + "'");
         }
 
-        long size = Files.size(scriptFile);
-        LOGGER.info("Exported " + dbFile.getFileName() + " -> " + scriptFile.getFileName() + " (" + size + " bytes)");
-        return scriptFile;
+        long size = Files.size(normalizedScript);
+        LOGGER.info("Exported " + dbFile.getFileName() + " -> " + normalizedScript.getFileName()
+                + " (" + size + " bytes)");
+        return normalizedScript;
     }
 
     /**
