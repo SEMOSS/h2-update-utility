@@ -53,6 +53,9 @@ Produces `target/h2-migration-service.jar` — a fat JAR containing both H2 vers
 
 ### Local Mode
 
+For a step-by-step local upgrade (including one driven by an AI assistant),
+follow the [Local upgrade runbook](docs/local-upgrade-runbook.md).
+
 ```bash
 java -jar target/h2-migration-service.jar \
   --mode=local \
@@ -290,23 +293,97 @@ All CLI flags can be set via environment variables (matching Semoss conventions)
 | `RCLONE` | Path to rclone binary (default: `rclone`) |
 | `ADDITIONAL_RCLONE_PARAMETERS` | Restricted transport options such as timeouts, retries, and CA certificate configuration |
 
-## Docker
+## Docker and Kubernetes (cloud mode)
+
+The container image is meant for cloud mode: a Kubernetes Job that migrates the
+H2 objects in remote storage before the 6.0.0 rollout. For a local SEMOSS home,
+use the JAR directly; see [Local upgrade runbook](docs/local-upgrade-runbook.md).
+
+The image pins its base images (`maven:3.9.11-amazoncorretto-21-debian` to build,
+`azul/zulu-openjdk:21.0.11-jre` to run), bundles rclone `v1.74.2` and gcloud
+`577.0.0`, and runs as uid/gid `10001`. Override the bases with
+`--build-arg BUILD_IMAGE=...` / `RUNTIME_IMAGE=...`, keeping both on the Java
+release set by `maven.compiler.release` in `pom.xml` (21). Any Java 21+ runtime
+produces identical files, since the conversion is done by the bundled H2 drivers.
 
 ```bash
-# Build locally
 docker build -t h2-migration-service:latest .
 
-# TODO: instructions to pull from Docker Hub
+# TODO: instructions to pull from the published registry
+```
 
-# Run local mode
-docker run -v /path/to/db:/data -v /path/to/backups:/backup \
-  h2-migration-service:latest --mode=local --db-dir=/data --backup-dir=/backup
+### Kubernetes Job
 
-# Run cloud mode
-docker run -e SEMOSS_STORAGE_PROVIDER=s3 \
-  -e S3_REGION=us-east-1 -e S3_BUCKET=mybucket \
-  h2-migration-service:latest --mode=cloud --backup-dir=/backup \
-  --search-path=semoss-db --dry-run
+Run one Job per scope: `SEARCH_PATH=semoss-db`, then `semoss-project` (Azure:
+one per `db-<engineId>` / `project-<projectId>` container). Start with
+`DRY_RUN=true`, review the report, scale every SEMOSS deployment that can reach
+the bucket to zero, then rerun with `DRY_RUN=false` and
+`CONFIRM_SEMOSS_STOPPED=true`.
+
+```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: h2-migrate-db
+spec:
+  backoffLimit: 0                # never retry a failed migration automatically
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: semoss  # reuse SEMOSS workload identity (IRSA/MSI/WI) if it has bucket access
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+      containers:
+        - name: migrate
+          image: h2-migration-service:latest
+          args: ["--mode=cloud"]  # replaces the default --help (empty args would not); rest from env
+          env:
+            - { name: BACKUP_DIR, value: /backup }
+            - { name: SEARCH_PATH, value: semoss-db }
+            - { name: DRY_RUN, value: "true" }
+            # - { name: CONFIRM_SEMOSS_STOPPED, value: "true" }  # actual run only
+            - { name: SEMOSS_STORAGE_PROVIDER, value: s3 }
+            - { name: S3_REGION, value: us-east-1 }
+            - { name: S3_BUCKET, value: my-semoss-bucket }
+            - { name: JAVA_TOOL_OPTIONS, value: "-Xmx4g" }
+          envFrom:
+            - secretRef: { name: semoss-storage }   # optional static keys / AZ_CONN_STRING
+          resources:
+            requests: { memory: 5Gi }
+          volumeMounts:
+            - { name: work, mountPath: /backup }
+      volumes:
+        - name: work
+          persistentVolumeClaim: { claimName: h2-migration-work }
+```
+
+- `/backup` is local staging plus `migration-report.json`. Use a PVC (not
+  `emptyDir`) so the report survives the pod, and size it for several times the
+  largest database in the scope. The durable backups live in the bucket under
+  `_semoss-h2-migration/<runId>/backup` (Azure: `semoss-h2-migration`).
+- Exit code `0` means no failures; `1` means at least one target failed or
+  needs manual review, so the Job shows `Failed`. Read the report before
+  rerunning.
+- Raise `-Xmx` and the memory request for multi-GB databases.
+- Credentials and provider variables are the same as the
+  [environment variables](#environment-variables) above. Prefer workload
+  identity; keys in a Secret are passed to rclone only through its environment.
+
+### Local volumes with Docker
+
+The image can also migrate a mounted SEMOSS home, though the JAR is the usual
+path. Stop SEMOSS first, mount `db/` at `/data/db` and `project/` at
+`/data/project` (engines are classified by the folder name, so a `db/` mounted
+directly at `/data` reports every user engine as unrecognized), keep the backup
+mount outside the database folder, and run as the owner of the files:
+
+```bash
+docker run --rm --user "$(id -u semoss):$(id -g semoss)" \
+  -v /opt/semosshome/db:/data/db -v /path/to/backups/db:/backup \
+  h2-migration-service:latest --mode=local --db-dir=/data/db --backup-dir=/backup --dry-run
 ```
 
 ## Architecture
