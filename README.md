@@ -314,63 +314,30 @@ docker build -t h2-migration-service:latest .
 
 ### Kubernetes Job
 
-Run one Job per scope: `SEARCH_PATH=semoss-db`, then `semoss-project` (Azure:
-one per `db-<engineId>` / `project-<projectId>` container). Start with
-`DRY_RUN=true`, review the report, scale every SEMOSS deployment that can reach
-the bucket to zero, then rerun with `DRY_RUN=false` and
-`CONFIRM_SEMOSS_STOPPED=true`.
+Manifests and the step-by-step run order are in [`deploy/k8s/`](deploy/k8s/README.md).
+One Job runs every scope in order (`SCOPES`, default `semoss-db semoss-project`)
+through `/app/migrate-all.sh`:
 
-```yaml
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: h2-migrate-db
-spec:
-  backoffLimit: 0                # never retry a failed migration automatically
-  template:
-    spec:
-      restartPolicy: Never
-      serviceAccountName: semoss  # reuse SEMOSS workload identity (IRSA/MSI/WI) if it has bucket access
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 10001
-        runAsGroup: 10001
-        fsGroup: 10001
-      containers:
-        - name: migrate
-          image: h2-migration-service:latest
-          args: ["--mode=cloud"]  # replaces the default --help (empty args would not); rest from env
-          env:
-            - { name: BACKUP_DIR, value: /backup }
-            - { name: SEARCH_PATH, value: semoss-db }
-            - { name: DRY_RUN, value: "true" }
-            # - { name: CONFIRM_SEMOSS_STOPPED, value: "true" }  # actual run only
-            - { name: SEMOSS_STORAGE_PROVIDER, value: s3 }
-            - { name: S3_REGION, value: us-east-1 }
-            - { name: S3_BUCKET, value: my-semoss-bucket }
-            - { name: JAVA_TOOL_OPTIONS, value: "-Xmx4g" }
-          envFrom:
-            - secretRef: { name: semoss-storage }   # optional static keys / AZ_CONN_STRING
-          resources:
-            requests: { memory: 5Gi }
-          volumeMounts:
-            - { name: work, mountPath: /backup }
-      volumes:
-        - name: work
-          persistentVolumeClaim: { claimName: h2-migration-work }
-```
+- Start with `DRY_RUN=true`, read the reports, scale SEMOSS to zero, then rerun
+  with `DRY_RUN=false` and `CONFIRM_SEMOSS_STOPPED=true`.
+- A scratch `emptyDir` at `/work` (a PVC is commented in `job.yaml`) holds download staging (`java.io.tmpdir`), local backups
+  and one report per scope under `/work/<runId>/<scope>/`. Durable backups live
+  in the bucket under `_semoss-h2-migration/<runId>/backup` (Azure:
+  `semoss-h2-migration`).
+- A dry run checks every scope; a real run stops at the first failed scope.
+  Exit code `1` (Job `Failed`) means at least one target failed.
+- Azure needs `SCOPES` set to every `db-<engineId>` / `project-<projectId>`
+  container.
 
-- `/backup` is local staging plus `migration-report.json`. Use a PVC (not
-  `emptyDir`) so the report survives the pod, and size it for several times the
-  largest database in the scope. The durable backups live in the bucket under
-  `_semoss-h2-migration/<runId>/backup` (Azure: `semoss-h2-migration`).
-- Exit code `0` means no failures; `1` means at least one target failed or
-  needs manual review, so the Job shows `Failed`. Read the report before
-  rerunning.
-- Raise `-Xmx` and the memory request for multi-GB databases.
-- Credentials and provider variables are the same as the
-  [environment variables](#environment-variables) above. Prefer workload
-  identity; keys in a Secret are passed to rclone only through its environment.
+### Image CI
+
+`.github/workflows/docker-image.yml` runs the unit tests, builds the image,
+smoke-tests it (uid, Java 21 JRE, rclone, gcloud, runner script) and pushes
+`linux/amd64` + `linux/arm64` to `quay.io/semoss/h2-update-utility` (repo
+variable `IMAGE_NAME` overrides). Tags: `vX.Y.Z` git tags push `X.Y.Z`, `X.Y`
+and `latest`; `main` pushes `main` and `main-<sha>`; pull requests build
+without pushing. Needs the `QUAY_ROBOT_USERNAME` / `QUAY_ROBOT_PASSWORD`
+secrets.
 
 ### Local volumes with Docker
 

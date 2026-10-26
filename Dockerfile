@@ -2,8 +2,8 @@
 ARG BUILD_IMAGE=maven:3.9.11-amazoncorretto-21-debian
 ARG RUNTIME_IMAGE=azul/zulu-openjdk:21.0.11-jre
 
-# Build stage
-FROM ${BUILD_IMAGE} AS build
+# Build stage; the jar is platform independent, so build once on the native platform
+FROM --platform=$BUILDPLATFORM ${BUILD_IMAGE} AS build
 WORKDIR /build
 COPY pom.xml .
 COPY src ./src
@@ -43,9 +43,10 @@ RUN groupadd -r -g 10001 migrator && useradd -r -u 10001 -g migrator -d /app mig
 
 WORKDIR /app
 COPY --from=build /build/target/h2-migration-service.jar /app/h2-migration-service.jar
+COPY --chmod=755 scripts/migrate-all.sh /app/migrate-all.sh
 
 # Default directories
-RUN mkdir -p /data /backup && chown -R migrator:migrator /app /data /backup
+RUN mkdir -p /data /backup /work && chown -R migrator:migrator /app /data /backup /work
 
 USER 10001:10001
 
