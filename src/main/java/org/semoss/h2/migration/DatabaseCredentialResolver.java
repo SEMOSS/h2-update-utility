@@ -86,10 +86,18 @@ public final class DatabaseCredentialResolver {
 
         if (selected == null) {
             if (target.targetType() == TargetType.SYSTEM_H2 && allCandidatesConfirmedNonH2) {
-                return target.skipped(
-                        "Base system database is configured for " + firstCandidate.backend()
-                                + "; retained H2 file is outside active migration scope",
-                        firstCandidate.path(), firstCandidate.backend(), warnings);
+                // migrate the retained file only, with the default system credentials;
+                // the non-H2 SMSS is never edited (service only updates H2 SMSS files)
+                warnings.add("Base system database is configured for " + firstCandidate.backend()
+                        + "; migrating the retained H2 file only, SMSS is left unchanged");
+                return target.resolved(
+                        CredentialSource.RETAINED_SYSTEM_DEFAULT,
+                        new SmssCredentialReader.Credentials(
+                                config.defaultUsername(), config.defaultPassword()),
+                        firstCandidate.path(),
+                        firstCandidate.backend(),
+                        RuntimeConnectionUrlBuilder.forH2Nio(target.databaseFile()),
+                        warnings);
             }
             Path nearest = candidates.isEmpty() ? null : candidates.get(0);
             String backend = candidates.isEmpty() ? "MISSING" : "NON_H2_OR_UNKNOWN";

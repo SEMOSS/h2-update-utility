@@ -53,7 +53,7 @@ class DatabaseCredentialResolverTest {
     }
 
     @Test
-    void systemDatabaseSkipsRetainedH2FileWhenActiveProfileIsPostgres() throws Exception {
+    void systemDatabaseMigratesRetainedH2FileWhenActiveProfileIsPostgres() throws Exception {
         Path dbRoot = tempDir.resolve("db");
         Path engine = dbRoot.resolve("Notification");
         Files.createDirectories(engine);
@@ -64,11 +64,12 @@ class DatabaseCredentialResolverTest {
         DatabaseTarget resolved = DatabaseCredentialResolver.resolve(
                 DatabaseClassifier.classify(dbRoot, dbFile), config(dbRoot));
 
-        assertEquals(Disposition.SKIP, resolved.disposition());
-        assertEquals(CredentialSource.NOT_APPLICABLE, resolved.credentialSource());
+        assertEquals(Disposition.MIGRATE, resolved.disposition());
+        assertEquals(CredentialSource.RETAINED_SYSTEM_DEFAULT, resolved.credentialSource());
+        assertTrue(resolved.readyToMigrate());
         assertEquals(profile.toAbsolutePath(), resolved.companionSmss());
         assertEquals("POSTGRES", resolved.companionBackend());
-        assertTrue(resolved.resolutionError().contains("outside active migration scope"));
+        assertTrue(resolved.warnings().stream().anyMatch(w -> w.contains("SMSS is left unchanged")));
     }
 
     @Test

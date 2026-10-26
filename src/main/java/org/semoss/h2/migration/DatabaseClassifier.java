@@ -15,6 +15,7 @@ public final class DatabaseClassifier {
 
     private static final Set<String> SYSTEM_FOLDERS = Set.of(
             "auditlogs",
+            "collaboration",
             "localmasterdatabase",
             "modelinferencelogsdatabase",
             "notification",

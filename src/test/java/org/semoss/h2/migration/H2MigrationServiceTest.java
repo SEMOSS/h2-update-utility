@@ -437,7 +437,7 @@ class H2MigrationServiceTest {
     }
 
     @Test
-    void run_skipsRetainedSystemH2WhenActiveSmssIsPostgres() throws Exception {
+    void run_migratesRetainedSystemH2WithoutTouchingPostgresSmss() throws Exception {
         Path dbRoot = tempDir.resolve("db");
         Path notification = dbRoot.resolve("Notification");
         Files.createDirectories(notification);
@@ -453,21 +453,50 @@ class H2MigrationServiceTest {
                 CONNECTION_URL\tjdbc:postgresql://localhost/postgres?currentSchema=notification
                 """);
         Path dbFile = Path.of(dbName + ".mv.db");
-        long sizeBefore = Files.size(dbFile);
+        Path smss = dbRoot.resolve("Notification.smss");
+        String smssBefore = Files.readString(smss);
         Path backupDir = tempDir.resolve("system-postgres-backups");
 
         H2MigrationService service = new H2MigrationService(config(dbRoot, backupDir, false));
 
         assertEquals(0, service.run());
         assertEquals(0, service.getReport().failedCount());
-        assertEquals(1, service.getReport().skippedCount());
+        assertEquals(1, service.getReport().successCount());
         var result = service.getReport().getResults().get(0);
         assertEquals("SYSTEM_H2", result.targetType());
         assertEquals("POSTGRES", result.companionBackend());
-        assertTrue(result.reason().contains("outside active migration scope"));
-        assertEquals(sizeBefore, Files.size(dbFile));
-        assertEquals(0, Files.walk(backupDir).filter(p -> p.toString().endsWith(".mv.db")).count());
-        assertTrue(H2VersionDetector.detect(dbFile).needsMigration());
+        assertFalse(H2VersionDetector.detect(dbFile).needsMigration());
+        assertEquals(smssBefore, Files.readString(smss));
+        assertEquals(1, Files.walk(backupDir).filter(p -> p.toString().endsWith(".mv.db")).count());
+    }
+
+    @Test
+    void run_leavesRetainedSystemH2UnchangedWhenDefaultCredentialsFail() throws Exception {
+        Path dbRoot = tempDir.resolve("db");
+        Path themes = dbRoot.resolve("themes");
+        Files.createDirectories(themes);
+        String dbName = themes.resolve("database").toAbsolutePath().toString();
+        try (IsolatedH2Driver oldH2 = IsolatedH2Driver.load("1.4.200");
+             Connection conn = oldH2.connect("jdbc:h2:" + dbName, "sa", "not-default");
+             Statement stmt = conn.createStatement()) {
+            stmt.execute("CREATE TABLE RETAINED_DATA (ID INT)");
+        }
+        Files.writeString(dbRoot.resolve("themes.smss"), """
+                RDBMS_TYPE\tPOSTGRES
+                DRIVER\torg.postgresql.Driver
+                CONNECTION_URL\tjdbc:postgresql://localhost/postgres?currentSchema=themes
+                """);
+        Path dbFile = Path.of(dbName + ".mv.db");
+        byte[] before = Files.readAllBytes(dbFile);
+
+        H2MigrationService service = new H2MigrationService(
+                config(dbRoot, tempDir.resolve("retained-bad-creds-backups"), false));
+
+        assertEquals(0, service.run());
+        assertEquals(1, service.getReport().skippedCount());
+        assertTrue(service.getReport().getResults().get(0).reason()
+                .contains("could not be exported with default credentials"));
+        assertTrue(java.util.Arrays.equals(before, Files.readAllBytes(dbFile)));
     }
 
     @Test
