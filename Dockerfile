@@ -1,6 +1,6 @@
 # Pinned images; bump both together (pom targets release 21)
-ARG BUILD_IMAGE=maven:3.9.11-amazoncorretto-21-debian
-ARG RUNTIME_IMAGE=azul/zulu-openjdk:21.0.11-jre
+ARG BUILD_IMAGE=maven:3.9.16-amazoncorretto-21-debian
+ARG RUNTIME_IMAGE=eclipse-temurin:21.0.12.1_1-jre-resolute
 
 # Build stage; the jar is platform independent, so build once on the native platform
 FROM --platform=$BUILDPLATFORM ${BUILD_IMAGE} AS build
@@ -19,10 +19,12 @@ LABEL org.opencontainers.image.licenses="Apache-2.0"
 LABEL org.opencontainers.image.vendor="Semoss"
 
 # Install rclone from a pinned release (override with --build-arg RCLONE_VERSION=...)
-ARG RCLONE_VERSION=v1.74.2
-ARG GCLOUD_VERSION=577.0.0
+# gcloud runs on its own bundled Python, so no system python3
+ARG RCLONE_VERSION=v1.75.2
+ARG GCLOUD_VERSION=590.0.1
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl unzip ca-certificates python3 && \
+    apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends curl unzip ca-certificates && \
     arch="$(dpkg --print-architecture)" && \
     curl -fsSL "https://downloads.rclone.org/${RCLONE_VERSION}/rclone-${RCLONE_VERSION}-linux-${arch}.zip" -o /tmp/rclone.zip && \
     unzip -j /tmp/rclone.zip "*/rclone" -d /usr/local/bin && \
@@ -31,7 +33,7 @@ RUN apt-get update && \
     curl -fsSL "https://storage.googleapis.com/cloud-sdk-release/google-cloud-cli-${GCLOUD_VERSION}-linux-${gcloud_arch}.tar.gz" -o /tmp/gcloud.tar.gz && \
     mkdir -p /opt && \
     tar -xzf /tmp/gcloud.tar.gz -C /opt && \
-    CLOUDSDK_PYTHON=/usr/bin/python3 /opt/google-cloud-sdk/install.sh --quiet --path-update=false --command-completion=false --usage-reporting=false && \
+    /opt/google-cloud-sdk/install.sh --quiet --path-update=false --command-completion=false --usage-reporting=false && \
     ln -s /opt/google-cloud-sdk/bin/gcloud /usr/local/bin/gcloud && \
     rm -f /tmp/rclone.zip /tmp/gcloud.tar.gz && \
     apt-get remove -y curl unzip && \

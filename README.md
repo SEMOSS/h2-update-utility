@@ -228,7 +228,7 @@ Do not also set `AZ_USE_MSI`, `AZ_ACCOUNT_NAME`, or `AZ_PRIMARY_KEY`; Azure
 requires exactly one authentication mode. The connection string is passed to
 rclone only through its child-process environment. It is never converted into a
 different credential or placed in command arguments, logs, or reports.
-The bundled migration image pins rclone `v1.74.2`, which supports Azure Blob's
+The bundled migration image pins rclone `v1.75.2`, which supports Azure Blob's
 direct `connection_string` configuration. When running the JAR outside the
 image, use a connection-string-capable rclone release rather than the older
 `v1.71.0` client.
@@ -299,9 +299,10 @@ The container image is meant for cloud mode: a Kubernetes Job that migrates the
 H2 objects in remote storage before the 6.0.0 rollout. For a local SEMOSS home,
 use the JAR directly; see [Local upgrade runbook](docs/local-upgrade-runbook.md).
 
-The image pins its base images (`maven:3.9.11-amazoncorretto-21-debian` to build,
-`azul/zulu-openjdk:21.0.11-jre` to run), bundles rclone `v1.74.2` and gcloud
-`577.0.0`, and runs as uid/gid `10001`. Override the bases with
+The image pins its base images (`maven:3.9.16-amazoncorretto-21-debian` to build,
+`eclipse-temurin:21.0.12.1_1-jre-resolute` (Ubuntu 26.04) to run), bundles rclone
+`v1.75.2` and gcloud `590.0.1` (on its bundled Python; no system `python3`),
+upgrades the base OS packages at build time, and runs as uid/gid `10001`. Override the bases with
 `--build-arg BUILD_IMAGE=...` / `RUNTIME_IMAGE=...`, keeping both on the Java
 release set by `maven.compiler.release` in `pom.xml` (21). Any Java 21+ runtime
 produces identical files, since the conversion is done by the bundled H2 drivers.
@@ -336,9 +337,9 @@ through `/app/migrate-all.sh`:
 `.github/workflows/docker-image.yml` runs the unit tests, builds the image,
 smoke-tests it (uid, Java 21 JRE, rclone, gcloud, runner script) and pushes
 `linux/amd64` + `linux/arm64` to `quay.io/semoss/h2-update-utility` (repo
-variable `IMAGE_NAME` overrides). Tags: `vX.Y.Z` git tags push `X.Y.Z`, `X.Y`
-and `latest`; `main` pushes `main` and `main-<sha>`; pull requests build
-without pushing. Needs the `QUAY_ROBOT_USERNAME` / `QUAY_ROBOT_PASSWORD`
+variable `IMAGE_NAME` overrides). Only `main` pushes, tagged `latest` and the
+UTC build date (`YYYY-MM-DD`; a second push that day moves the date tag); pull
+requests build without pushing. Needs the `QUAY_ROBOT_USERNAME` / `QUAY_ROBOT_PASSWORD`
 secrets.
 
 ### Local volumes with Docker
