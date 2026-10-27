@@ -50,7 +50,7 @@
         <h2.new.version>2.4.240</h2.new.version>
         <junit.version>5.11.4</junit.version>
         <gson.version>2.11.0</gson.version>
-        <log4j.version>2.24.3</log4j.version>
+        <log4j.version>2.26.1</log4j.version>
     </properties>
 
     <dependencies>

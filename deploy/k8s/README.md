@@ -13,7 +13,7 @@ One Job runs every scope in order (`semoss-db`, then `semoss-project`) through
 
 ## Before you start
 
-- Set the image tag in `job.yaml` and `report-reader.yaml` to the released version.
+- Set the image tag in `job.yaml` and `report-reader.yaml` to a dated build (`YYYY-MM-DD`) instead of `latest`.
 - Set the provider block in `job.yaml` (`SEMOSS_STORAGE_PROVIDER` plus that
   provider's bucket/region variables; see the main README's environment table).
 - Credentials: give `serviceAccountName` bucket read/write via workload identity
