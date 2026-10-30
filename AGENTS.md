@@ -147,6 +147,13 @@ same-base `.mv.db` fails without touching either; the backup dir is not
 rescanned; already-2.x rows still get their `.smss` URL repaired; all H2 1.x
 URL settings 2.4.240 rejects are removed; `.smss` files are read like SEMOSS
 reads them (Java properties, ISO-8859-1), so any code page works.
+Legacy text LOB column aliases (`TEXT`, `LONGTEXT`, `MEDIUMTEXT`, `TINYTEXT`,
+`NTEXT`) are rewritten to `CLOB`, preserving their H2 1.4 type. A missing H2
+SMSS username defaults to empty unless explicitly overridden by `--default-user`
+or `DEFAULT_USER`; a blank configured username remains blank. Generated
+audit/project/frame profiles and retained-system fallback defaults are unchanged.
+Already-converted files are not retroactively repaired for changed column types;
+verify these fixes on fresh copies of the pre-migration files.
 
 | Limitation | What to do |
 |---|---|

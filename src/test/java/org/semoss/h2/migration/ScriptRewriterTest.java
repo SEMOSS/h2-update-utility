@@ -62,7 +62,7 @@ class ScriptRewriterTest {
         ScriptRewriter.RewriteResult r1 = ScriptRewriter.rewriteLine(
                 "CREATE TABLE T(A MEDIUMTEXT, B TINYTEXT);");
         assertEquals(2, r1.replacements());
-        assertEquals("CREATE TABLE T(A VARCHAR, B VARCHAR);", r1.text());
+        assertEquals("CREATE TABLE T(A CLOB, B CLOB);", r1.text());
     }
 
     @Test
@@ -70,7 +70,7 @@ class ScriptRewriterTest {
         ScriptRewriter.RewriteResult r = ScriptRewriter.rewriteLine(
                 "CREATE TABLE T(X NTEXT);");
         assertEquals(1, r.replacements());
-        assertEquals("CREATE TABLE T(X VARCHAR);", r.text());
+        assertEquals("CREATE TABLE T(X CLOB);", r.text());
     }
 
     @Test
@@ -108,6 +108,51 @@ class ScriptRewriterTest {
     }
 
     // --- Case insensitivity ---
+
+    @Test
+    void rewritesTextOnlyInColumnTypePositions() {
+        String sql = "CREATE CACHED TABLE TEXT(\"TEXT\" text, TEXT_LABEL VARCHAR(20), "
+                + "BODY TEXT DEFAULT 'TEXT', CONSTRAINT TEXT CHECK(TEXT_LABEL <> 'TEXT')); "
+                + "INSERT INTO TEXT VALUES('TEXT', 'TEXT', 'TEXT'); SELECT TEXT_LABEL FROM TEXT;";
+        var result = ScriptRewriter.rewriteLine(sql);
+        assertEquals(2, result.replacements());
+        assertEquals(sql.replace("\"TEXT\" text", "\"TEXT\" CLOB")
+                .replace("BODY TEXT", "BODY CLOB"), result.text());
+        assertEquals(2, result.perToken().get("TEXT"));
+    }
+
+    @Test
+    void textRewritingTracksMultilineDdlCommentsAndLiterals() throws Exception {
+        Path script = tempDir.resolve("text-context.sql");
+        String sql = """
+                -- CREATE TABLE FAKE(NOTE TEXT);
+                /* CREATE TABLE FAKE(NOTE TEXT);
+                   /* nested */ */
+                CREATE MEMORY TABLE "TEXT"."T" (
+                    "TEXT" /* type follows */
+                    TEXT,
+                    "BODY" TEXT DEFAULT 'multi-line
+                CREATE TABLE FAKE(NOTE TEXT);
+                still a string',
+                    "ESCAPED" TEXT DEFAULT 'it''s TEXT',
+                    "CLOB" CLOB,
+                    "LABEL" VARCHAR(100)
+                );
+                INSERT INTO "TEXT"."T" VALUES('TEXT', 'TEXT', 'TEXT', NULL, 'TEXT');
+                CREATE ALIAS F AS $$
+                CREATE TABLE FAKE(NOTE TEXT);
+                $$;
+                CREATE TABLE SECOND(NOTE TEXT);
+                """;
+        Files.writeString(script, sql);
+        var report = ScriptRewriter.rewriteAndScanInPlace(script);
+        assertEquals(4, report.totalReplacements());
+        assertEquals(4, report.replacementsByToken().get("TEXT"));
+        assertEquals(sql.replace("    TEXT,", "    CLOB,")
+                .replace("\"BODY\" TEXT", "\"BODY\" CLOB")
+                .replace("\"ESCAPED\" TEXT", "\"ESCAPED\" CLOB")
+                .replace("SECOND(NOTE TEXT)", "SECOND(NOTE CLOB)"), Files.readString(script));
+    }
 
     @Test
     void replacementIsCaseInsensitive() {

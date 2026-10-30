@@ -69,6 +69,7 @@ class DatabaseCredentialResolverTest {
         assertTrue(resolved.readyToMigrate());
         assertEquals(profile.toAbsolutePath(), resolved.companionSmss());
         assertEquals("POSTGRES", resolved.companionBackend());
+        assertEquals("sa", resolved.credentials().username());
         assertTrue(resolved.warnings().stream().anyMatch(w -> w.contains("SMSS is left unchanged")));
     }
 
@@ -143,6 +144,26 @@ class DatabaseCredentialResolverTest {
         });
     }
 
+    @Test
+    void missingPrimaryUsernameUsesH2DefaultUnlessOperatorOverridesIt() throws Exception {
+        Path root = Files.createDirectories(tempDir.resolve("db"));
+        Path folder = Files.createDirectories(root.resolve("Example__id"));
+        Path file = Files.createFile(folder.resolve("database.mv.db"));
+        Path profile = root.resolve("Example__id.smss");
+        Files.writeString(profile, "RDBMS_TYPE=H2_DB\nPASSWORD=\nCONNECTION_URL=jdbc:h2:/old/database\n");
+        DatabaseTarget target = DatabaseClassifier.classify(root, file);
+        assertEquals("", DatabaseCredentialResolver.resolve(target, config(root)).credentials().username());
+
+        MigrationConfig override = MigrationConfig.fromArgs(new String[]{
+                "--db-dir=" + root, "--default-user=operator"});
+        assertEquals("operator", DatabaseCredentialResolver.resolve(target, override).credentials().username());
+
+        Files.writeString(profile, "RDBMS_TYPE=H2_DB\nUSERNAME=\nPASSWORD=\nCONNECTION_URL=jdbc:h2:/old/database\n");
+        assertEquals("", DatabaseCredentialResolver.resolve(target, override).credentials().username());
+        Files.writeString(profile, h2Smss("configured", ""));
+        assertEquals("configured", DatabaseCredentialResolver.resolve(target, override).credentials().username());
+    }
+
     private String postgresSmss() {
         return """
                 RDBMS_TYPE\tPOSTGRES
@@ -151,6 +172,63 @@ class DatabaseCredentialResolverTest {
                 PASSWORD\tsecret
                 CONNECTION_URL\tjdbc:postgresql://localhost/postgres
                 """;
+    }
+
+    @Test
+    void rootLevelDatabaseSelectsProfileWhoseUrlReferencesItsFile() throws Exception {
+        Path root = Files.createDirectories(tempDir.resolve("db"));
+        Path file = Files.createFile(root.resolve("fixture.mv.db"));
+        Files.writeString(root.resolve("A-unrelated.smss"), h2Smss("wrong", "wrong"));
+        Path correct = root.resolve("Z-fixture-engine.smss");
+        Files.writeString(correct, h2Smss("fixture-user", "fixture-password")
+                .replace("/original/database", "/original/home/db/fixture"));
+
+        DatabaseTarget resolved = DatabaseCredentialResolver.resolve(
+                DatabaseClassifier.classify(root, file), config(root));
+
+        assertEquals(correct.toAbsolutePath(), resolved.companionSmss());
+        assertEquals("fixture-user", resolved.credentials().username());
+        assertTrue(resolved.runtimeUrl().contains(file.getParent().toString() + "/fixture"));
+    }
+
+    @Test
+    void rootLevelDatabaseSupportsBaseFolderPlaceholder() throws Exception {
+        Path root = Files.createDirectories(tempDir.resolve("db"));
+        Path file = Files.createFile(root.resolve("fixture.mv.db"));
+        Path profile = root.resolve("Fixture__id.smss");
+        Files.writeString(profile, h2Smss("sa", "")
+                .replace("/original/database", "@BaseFolder@/db/fixture"));
+        DatabaseTarget resolved = DatabaseCredentialResolver.resolve(
+                DatabaseClassifier.classify(root, file), config(root));
+        assertEquals(profile.toAbsolutePath(), resolved.companionSmss());
+        assertTrue(resolved.readyToMigrate());
+    }
+
+    @Test
+    void rootLevelDatabaseRefusesUnrelatedAndRemoteProfiles() throws Exception {
+        Path root = Files.createDirectories(tempDir.resolve("db"));
+        Path file = Files.createFile(root.resolve("fixture.mv.db"));
+        Files.writeString(root.resolve("A-unrelated.smss"), h2Smss("wrong", "wrong"));
+        Files.writeString(root.resolve("Z-remote.smss"), h2Smss("remote", "")
+                .replace("jdbc:h2:nio:/original/database", "jdbc:h2:tcp://server/other/db/fixture"));
+        DatabaseTarget resolved = DatabaseCredentialResolver.resolve(
+                DatabaseClassifier.classify(root, file), config(root));
+        assertEquals(Disposition.MANUAL_REVIEW, resolved.disposition());
+        assertEquals(CredentialSource.UNRESOLVED, resolved.credentialSource());
+    }
+
+    @Test
+    void rootLevelDatabaseRefusesAmbiguousPathMatches() throws Exception {
+        Path root = Files.createDirectories(tempDir.resolve("db"));
+        Path file = Files.createFile(root.resolve("fixture.mv.db"));
+        for (String name : new String[]{"A.smss", "B.smss"}) {
+            Files.writeString(root.resolve(name), h2Smss(name, "")
+                    .replace("/original/database", "/original/home/db/fixture"));
+        }
+        DatabaseTarget resolved = DatabaseCredentialResolver.resolve(
+                DatabaseClassifier.classify(root, file), config(root));
+        assertEquals(Disposition.MANUAL_REVIEW, resolved.disposition());
+        assertTrue(resolved.resolutionError().contains("Multiple H2 SMSS profiles"));
     }
 
     private String h2Smss(String username, String password) {

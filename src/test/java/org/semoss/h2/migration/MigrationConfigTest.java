@@ -28,6 +28,7 @@ class MigrationConfigTest {
         assertEquals(tempDir.resolve(".h2-backup").toAbsolutePath().normalize(), config.backupDir());
         assertFalse(config.dryRun());
         assertEquals("sa", config.defaultUsername());
+        assertEquals("", config.primaryDefaultUsername());
         assertEquals("", config.defaultPassword());
         assertEquals("rclone", config.rclonePath());
         assertEquals("rclone", config.gcsTransferBackend());
@@ -48,7 +49,16 @@ class MigrationConfigTest {
         assertEquals(tempDir.resolve("bkp").toAbsolutePath().normalize(), config.backupDir());
         assertTrue(config.dryRun());
         assertEquals("admin", config.defaultUsername());
+        assertEquals("admin", config.primaryDefaultUsername());
         assertEquals("secret", config.defaultPassword());
+    }
+
+    @Test
+    void explicitEmptyUserIsPreservedForBothFallbacks() {
+        MigrationConfig config = MigrationConfig.fromArgs(new String[]{
+                "--db-dir=" + tempDir, "--default-user="});
+        assertEquals("", config.defaultUsername());
+        assertEquals("", config.primaryDefaultUsername());
     }
 
     @Test

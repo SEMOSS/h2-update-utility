@@ -48,6 +48,65 @@ class LocalMigrationIT {
     // Helpers
     // -----------------------------------------------------------------------
 
+    @Test
+    void omittedAndBlankUsernamesMigrateTextAliasesAsClobs() throws Exception {
+        String[] aliases = {"TEXT", "LONGTEXT", "MEDIUMTEXT", "TINYTEXT", "NTEXT"};
+        String value = "Unicode café 漢字; TEXT 'quoted'\n".repeat(1000);
+        for (String name : new String[]{"MissingUser__id", "BlankUser__id"}) {
+            Path engine = Files.createDirectories(dbDir.resolve(name));
+            String base = engine.resolve("database").toString();
+            // Synthetic test profiles only; no installation SMSS is used.
+            Files.writeString(dbDir.resolve(name + ".smss"),
+                    "RDBMS_TYPE=H2_DB\nPASSWORD=\n"
+                    + (name.startsWith("Blank") ? "USERNAME=\n" : "")
+                    + "CONNECTION_URL=jdbc:h2:nio:" + base + "\n");
+            try (IsolatedH2Driver old = IsolatedH2Driver.load("1.4.200");
+                 Connection conn = old.connect("jdbc:h2:" + base, "", "");
+                 Statement stmt = conn.createStatement()) {
+                for (String alias : aliases) {
+                    stmt.execute("CREATE TABLE T_" + alias + "(ID INT PRIMARY KEY, BODY " + alias + ")");
+                    try (var insert = conn.prepareStatement("INSERT INTO T_" + alias + " VALUES(?, ?)")) {
+                        insert.setInt(1, 1);
+                        insert.setString(2, value);
+                        insert.executeUpdate();
+                        insert.setInt(1, 2);
+                        insert.setNull(2, java.sql.Types.CLOB);
+                        insert.executeUpdate();
+                    }
+                    try (ResultSet rs = stmt.executeQuery("SELECT BODY FROM T_" + alias)) {
+                        assertEquals(java.sql.Types.CLOB, rs.getMetaData().getColumnType(1));
+                    }
+                }
+            }
+        }
+
+        // CLI defaults, without the old --default-user= workaround.
+        MigrationConfig config = MigrationConfig.fromArgs(new String[]{
+                "--db-dir=" + dbDir, "--backup-dir=" + backupDir});
+        H2MigrationService service = new H2MigrationService(config);
+        assertEquals(0, service.run());
+        assertEquals(2, service.getReport().successCount());
+        assertEquals(0, service.getReport().failedCount());
+
+        try (IsolatedH2Driver migrated = IsolatedH2Driver.load("2.4.240")) {
+            for (String name : new String[]{"MissingUser__id", "BlankUser__id"}) {
+                try (Connection conn = migrated.connect("jdbc:h2:" + dbDir.resolve(name).resolve("database"), "", "");
+                     Statement stmt = conn.createStatement()) {
+                    for (String alias : aliases) {
+                        try (ResultSet rs = stmt.executeQuery("SELECT BODY FROM T_" + alias + " ORDER BY ID")) {
+                            assertEquals(java.sql.Types.CLOB, rs.getMetaData().getColumnType(1), alias);
+                            assertTrue(rs.next());
+                            assertEquals(value, rs.getString(1), alias);
+                            assertTrue(rs.next());
+                            assertEquals(null, rs.getString(1));
+                            assertFalse(rs.next());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private MigrationConfig localConfig(Path scanDir) {
         return new MigrationConfig(
                 MigrationConfig.MigrationMode.LOCAL,
