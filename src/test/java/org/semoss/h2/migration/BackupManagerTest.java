@@ -63,17 +63,20 @@ class BackupManagerTest {
     }
 
     @Test
-    void restorePageStoreRemovesFailedMvStoreReplacement() throws IOException {
+    void restorePageStoreLeavesSameBaseMvStoreUntouched() throws IOException {
         Path original = tempDir.resolve("legacy.h2.db");
-        Path replacement = tempDir.resolve("legacy.mv.db");
+        Path sibling = tempDir.resolve("legacy.mv.db");
         Path backup = tempDir.resolve("backup.h2.db");
-        Files.writeString(replacement, "failed-new-store");
+        Files.writeString(sibling, "never-backed-up");
         Files.writeString(backup, "original-page-store");
 
         new BackupManager(tempDir).restore(backup, original);
 
         assertEquals("original-page-store", Files.readString(original));
-        assertTrue(Files.notExists(replacement));
+        assertEquals("never-backed-up", Files.readString(sibling));
+        try (var files = Files.list(tempDir)) {
+            assertTrue(files.noneMatch(p -> p.getFileName().toString().endsWith(".h2-restore-tmp")));
+        }
     }
 
 }

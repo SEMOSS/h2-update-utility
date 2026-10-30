@@ -195,4 +195,57 @@ class DatabaseImporterTest {
         }
     }
 
+    @Test
+    void importToTemp_leavesOriginalUntilPromote() throws Exception {
+        try (IsolatedH2Driver oldH2 = IsolatedH2Driver.load("1.4.200");
+             IsolatedH2Driver newH2 = IsolatedH2Driver.load("2.4.240")) {
+            String dbName = tempDir.resolve("staged").toAbsolutePath().toString();
+            try (Connection conn = oldH2.connect("jdbc:h2:" + dbName, "sa", "");
+                 Statement stmt = conn.createStatement()) {
+                stmt.execute("CREATE TABLE T(X INT)");
+            }
+            Path dbFile = Path.of(dbName + ".mv.db");
+            byte[] original = Files.readAllBytes(dbFile);
+            Path script = new DatabaseExporter(oldH2).export(dbFile, "sa", "");
+
+            Path temp = new DatabaseImporter(newH2).importToTemp(dbFile, script, "sa", "");
+
+            assertTrue(java.util.Arrays.equals(original, Files.readAllBytes(dbFile)));
+            assertTrue(!H2VersionDetector.detect(temp).needsMigration());
+            DatabaseImporter.promote(dbFile);
+            assertTrue(Files.notExists(temp));
+            assertTrue(!H2VersionDetector.detect(dbFile).needsMigration());
+        }
+    }
+
+    @Test
+    void importToTemp_failureKeepsOriginalAndRemovesTemp() throws Exception {
+        try (IsolatedH2Driver newH2 = IsolatedH2Driver.load("2.4.240")) {
+            Path dbFile = tempDir.resolve("broken.mv.db");
+            Files.writeString(dbFile, "original bytes");
+            Path script = tempDir.resolve("bad.sql");
+            Files.writeString(script, "THIS IS NOT SQL;");
+
+            org.junit.jupiter.api.Assertions.assertThrows(java.sql.SQLException.class,
+                    () -> new DatabaseImporter(newH2).importToTemp(dbFile, script, "sa", ""));
+
+            assertEquals("original bytes", Files.readString(dbFile));
+            assertTrue(Files.notExists(DatabaseImporter.tempFile(dbFile)));
+        }
+    }
+
+    @Test
+    void promote_refusesToOverwriteSameBaseMvStoreForPageStore() throws Exception {
+        Path pageStore = tempDir.resolve("legacy.h2.db");
+        Path mvStore = tempDir.resolve("legacy.mv.db");
+        Files.writeString(pageStore, "page");
+        Files.writeString(mvStore, "unrelated");
+        Files.writeString(DatabaseImporter.tempFile(pageStore), "migrated");
+
+        org.junit.jupiter.api.Assertions.assertThrows(java.io.IOException.class,
+                () -> DatabaseImporter.promote(pageStore));
+
+        assertEquals("unrelated", Files.readString(mvStore));
+        assertEquals("page", Files.readString(pageStore));
+    }
 }

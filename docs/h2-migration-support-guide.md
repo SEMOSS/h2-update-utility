@@ -449,10 +449,10 @@ These flags are also recorded in the migration report for reference.
 ## FAQ
 
 ### Q: Will my data be lost?
-**A:** No. The migration utility creates a backup of the original database before importing. If anything goes wrong, the original is restored. The migration report shows the backup location.
+**A:** No. The migration utility creates a backup of the original database before importing. The import is written to a temp file and only replaces the original after it is verified; if anything fails after that, the original is restored from the backup. Locked files are refused without changes. The migration report shows the backup location.
 
 ### Q: What if migration partially fails (some databases succeed, others fail)?
-**A:** Each database is processed independently. If one fails, others continue. The final report shows success/failure counts. Failed databases are restored from backup; successful ones are migrated.
+**A:** Each database is processed independently. If one fails, others continue. The final report shows success/failure counts. Failed databases are left as they were (or restored from backup if they had already been replaced); successful ones are migrated. If a run is killed, rerun it: half-done files are restored from their backup and migrated again.
 
 ### Q: How long does migration take?
 **A:** Depends on database size. As a rule of thumb: ~1 second per 10 MB of export size. Very large databases (50+ GB) may take hours. The utility logs progress.

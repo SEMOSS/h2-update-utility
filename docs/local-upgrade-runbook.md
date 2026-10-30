@@ -24,7 +24,9 @@ step with the operator; steps marked **GATE** need the operator's explicit OK.
 | Java | 21 or newer (`java -version`) |
 
 Free space in the work folder: about 3x the total size of `*.mv.db` and
-`*.h2.db` files under the home.
+`*.h2.db` files under the home. Free space on the home's own disk: at least the
+largest single H2 file, because each import is written next to its original
+before it replaces it.
 
 ## 1. Stop SEMOSS (GATE)
 
@@ -63,10 +65,15 @@ Read each report and sort the rows:
 | Result | Meaning | Action |
 |---|---|---|
 | `SKIPPED`, already 2.x | File is already format 2+ | none |
+| `SKIPPED`, already 2.x, "repaired .smss CONNECTION_URL" (dry run: "would remove") | File was migrated earlier; its `.smss` URL still had settings 2.x rejects | none |
+| `SKIPPED`, "Dry run - interrupted migration found" | An earlier real run was killed mid-file | none: the real run restores it from the named backup and migrates it again |
 | `SKIPPED`, `InsightCache` | Cache, rebuilt by SEMOSS | none |
 | `SUCCESS` with warning "migrating the retained H2 file only" | System DB whose `.smss` points to Postgres/SQLite; the leftover H2 file is converted, `.smss` untouched | none |
 | `FAILED`, "Unrecognized H2 database location" | H2 file the utility cannot classify, often a custom app's own file under `project/*/app_root/` | ask the operator: leave it, or handle it separately |
-| any other `FAILED` | credentials, lock, corrupt file, missing `.smss` | stop; see the [support guide](h2-migration-support-guide.md) |
+| `FAILED`, "locked by another process" or "lock file ... exists" | Something (usually SEMOSS) still has the file open; nothing was changed | stop SEMOSS and rerun; if nothing runs, report the stale `.lock.db` to the operator |
+| `FAILED`, "Both X.h2.db and X.mv.db exist" | Two H2 files share one base name; neither was touched | ask the operator which one SEMOSS uses |
+| `FAILED`, "Interrupted migration could not be recovered" | A marker from a killed run points at a missing backup | stop; restore that database from `pre-migration` |
+| any other `FAILED` | credentials, corrupt file, missing `.smss` | stop; see the [support guide](h2-migration-support-guide.md) |
 
 Exit code `0` means no failures; `1` means at least one `FAILED` row.
 
@@ -84,10 +91,17 @@ java -jar "$J" --mode=local --db-dir="$H/db"      --backup-dir="$W/bk-db";      
 java -jar "$J" --mode=local --db-dir="$H/project" --backup-dir="$W/bk-project"; echo "exit=$?"
 ```
 
-Each migrated file is backed up, exported with H2 1.4.200 and imported in place
-with 2.4.240; H2 `.smss` URLs drop settings 2.x rejects. If the run is killed
-mid-import, restore that file from the backup before rerunning (a partial file
-can be reported as already migrated).
+Each migrated file is checked for locks, backed up, exported with H2 1.4.200
+and imported with 2.4.240 into a temp file next to it
+(`<name>.h2-migrating-tmp.mv.db`). The temp file is verified and then moved over
+the original in one atomic step; H2 `.smss` URLs drop settings 2.x rejects. A
+failure before that move leaves the original untouched; a failure after it
+restores the file from its backup.
+
+If a real run is killed, rerun the same command. A `<name>.h2-migrating` marker
+next to a file means it was replaced but not yet verified: the rerun restores it
+from the backup named in the marker and migrates it again (the row shows
+`recoveredInterruptedMigrationFrom`). Never delete a marker by hand.
 
 ## 6. Verify
 
@@ -123,5 +137,6 @@ so the old version needs the old files.
 - Keep the work folder path short (backups nest the source path; 260-char limit).
 - Pause antivirus real-time scanning on the home and work folder if exports
   fail with access-denied errors.
-- `.smss` files saved in a non-UTF-8 code page can fail to parse; report them
-  to the operator rather than re-saving them.
+- `.smss` files are read the way SEMOSS reads them (Java properties,
+  ISO-8859-1), so files saved in a Windows code page are fine. Do not re-save
+  them.

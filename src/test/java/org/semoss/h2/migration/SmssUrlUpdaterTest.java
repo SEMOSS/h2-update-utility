@@ -35,4 +35,31 @@ class SmssUrlUpdaterTest {
         assertFalse(updated.toLowerCase().contains("early_filter"));
         assertFalse(updated.toLowerCase().contains("query_cache_size"));
     }
+
+    @Test
+    void applyPreservesNonUtf8BytesOutsideTheUrl() throws Exception {
+        Path smss = tempDir.resolve("cp1252.smss");
+        java.nio.charset.Charset cp1252 = java.nio.charset.Charset.forName("windows-1252");
+        String prefix = "#Caf\u00e9\r\nRDBMS_TYPE\tH2_DB\r\nPASSWORD\tp\u00e4ss\r\n";
+        Files.write(smss, (prefix + "CONNECTION_URL\tjdbc:h2:nio:/db;MVCC=TRUE;CACHE_SIZE=1\r\n").getBytes(cp1252));
+
+        var plan = SmssUrlUpdater.preview(smss);
+        assertEquals(java.util.List.of("MVCC"), plan.removedSettings());
+        SmssUrlUpdater.apply(plan);
+
+        assertEquals(prefix + "CONNECTION_URL\tjdbc:h2:nio:/db;CACHE_SIZE=1\r\n",
+                new String(Files.readAllBytes(smss), cp1252));
+    }
+
+    @Test
+    void applyHandlesEqualsSeparatorAndEscapedBackslashes() throws Exception {
+        Path smss = tempDir.resolve("equals.smss");
+        Files.writeString(smss, "RDBMS_TYPE=H2_DB\nCONNECTION_URL = jdbc:h2:nio:C:\\\\SEMOSS\\\\db;MULTI_THREADED=1\n");
+
+        var plan = SmssUrlUpdater.preview(smss);
+        assertEquals("jdbc:h2:nio:C:\\SEMOSS\\db", plan.sanitizedUrl());
+        SmssUrlUpdater.apply(plan);
+
+        assertEquals("RDBMS_TYPE=H2_DB\nCONNECTION_URL = jdbc:h2:nio:C:\\\\SEMOSS\\\\db\n", Files.readString(smss));
+    }
 }

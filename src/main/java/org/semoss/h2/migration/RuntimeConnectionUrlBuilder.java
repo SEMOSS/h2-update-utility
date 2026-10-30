@@ -11,8 +11,15 @@ import java.util.Set;
 public final class RuntimeConnectionUrlBuilder {
 
     private static final String H2_PREFIX = "jdbc:h2:";
+    // H2 1.x URL settings that H2 2.4.240 rejects (probed against the 2.4.240 driver)
     private static final Set<String> UNSUPPORTED_H2_2_SETTINGS = Set.of(
-            "EARLY_FILTER", "QUERY_CACHE_SIZE", "LOG", "UNDO_LOG");
+            "EARLY_FILTER", "QUERY_CACHE_SIZE", "LOG", "UNDO_LOG",
+            "MVCC", "MULTI_THREADED", "ALIAS_COLUMN_NAME", "COMPRESS_LOB", "ACCESS_MODE_LOG",
+            "REDO_LOG_BINARY", "BINARY_COLLATION", "UUID_COLLATION", "LARGE_TRANSACTIONS",
+            "PAGE_STORE_INTERNAL_COUNT", "PAGE_STORE_MAX_GROWTH", "PAGE_STORE_TRIM",
+            "NESTED_JOINS", "OPTIMIZE_UPDATE", "FUNCTIONS_IN_SCHEMA", "BATCH_JOINS",
+            "ROW_FACTORY", "LOCAL_RESULT_FACTORY", "COLUMN_NAME_RULES", "MAX_COMPACT_COUNT",
+            "STORE_LOCAL_TIME", "SCOPE_GENERATED_KEYS");
 
     private RuntimeConnectionUrlBuilder() {}
 
@@ -58,11 +65,8 @@ public final class RuntimeConnectionUrlBuilder {
         Set<String> found = new LinkedHashSet<>();
         String[] segments = configuredUrl.split(";");
         for (int i = 1; i < segments.length; i++) {
-            String segment = segments[i].trim();
-            int equals = segment.indexOf('=');
-            String key = (equals >= 0 ? segment.substring(0, equals) : segment)
-                    .trim().toUpperCase(Locale.ROOT);
-            if (UNSUPPORTED_H2_2_SETTINGS.contains(key)) found.add(key);
+            String key = settingKey(segments[i]);
+            if (isUnsupported(segments[i])) found.add(key);
         }
         return new ArrayList<>(found);
     }
@@ -74,14 +78,28 @@ public final class RuntimeConnectionUrlBuilder {
         StringBuilder sanitized = new StringBuilder(segments[0]);
         for (int i = 1; i < segments.length; i++) {
             String segment = segments[i];
-            String trimmed = segment.trim();
-            int equals = trimmed.indexOf('=');
-            String key = (equals >= 0 ? trimmed.substring(0, equals) : trimmed)
-                    .trim().toUpperCase(Locale.ROOT);
-            if (!UNSUPPORTED_H2_2_SETTINGS.contains(key)) {
+            if (!isUnsupported(segment)) {
                 sanitized.append(';').append(segment);
             }
         }
         return sanitized.toString();
+    }
+
+    private static boolean isUnsupported(String segment) {
+        String key = settingKey(segment);
+        if (UNSUPPORTED_H2_2_SETTINGS.contains(key)) return true;
+        // 2.x is MVStore-only: MV_STORE=TRUE still opens, MV_STORE=FALSE does not
+        return "MV_STORE".equals(key) && "FALSE".equalsIgnoreCase(settingValue(segment));
+    }
+
+    private static String settingKey(String segment) {
+        String trimmed = segment.trim();
+        int equals = trimmed.indexOf('=');
+        return (equals >= 0 ? trimmed.substring(0, equals) : trimmed).trim().toUpperCase(Locale.ROOT);
+    }
+
+    private static String settingValue(String segment) {
+        int equals = segment.indexOf('=');
+        return equals >= 0 ? segment.substring(equals + 1).trim() : "";
     }
 }

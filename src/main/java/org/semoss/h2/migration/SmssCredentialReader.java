@@ -1,6 +1,9 @@
 package org.semoss.h2.migration;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.Reader;
+import java.io.StringReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -10,6 +13,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Properties;
 import java.util.Set;
 
 import org.apache.logging.log4j.LogManager;
@@ -18,12 +22,13 @@ import org.apache.logging.log4j.Logger;
 /**
  * Reads USERNAME and PASSWORD from Semoss {@code .smss} configuration files.
  * <p>
- * SMSS files use whitespace-delimited key/value pairs (tabs are typical):
+ * SMSS files are Java properties files (tabs are the typical separator):
  * <pre>
  * USERNAME    sa
  * PASSWORD    secret
  * </pre>
- * PASSWORD may be omitted or empty.
+ * PASSWORD may be omitted or empty. Files are parsed like SEMOSS does it:
+ * {@link Properties#load(InputStream)} (ISO-8859-1, backslash escapes), values trimmed.
  */
 public final class SmssCredentialReader {
 
@@ -130,28 +135,9 @@ public final class SmssCredentialReader {
         String username = fallbackUser;
         String password = fallbackPass;
 
-        try {
-            List<String> lines = Files.readAllLines(smssFile);
-            for (String line : lines) {
-                String trimmed = line.trim();
-                if (trimmed.isEmpty() || trimmed.startsWith("#")) continue;
-
-                // Split on first whitespace run (tab or spaces)
-                String[] parts = trimmed.split("\\s+", 2);
-                if (parts.length == 0) continue;
-
-                String key = parts[0].toUpperCase();
-                String value = parts.length > 1 ? parts[1].trim() : "";
-
-                if ("USERNAME".equals(key) && !value.isEmpty()) {
-                    username = value;
-                } else if ("PASSWORD".equals(key) && !value.isEmpty()) {
-                    password = value;
-                }
-            }
-        } catch (IOException e) {
-            LOGGER.warn("Error reading .smss file: " + smssFile, e);
-        }
+        Map<String, String> values = loadValues(smssFile);
+        if (!values.getOrDefault("USERNAME", "").isEmpty()) username = values.get("USERNAME");
+        if (!values.getOrDefault("PASSWORD", "").isEmpty()) password = values.get("PASSWORD");
 
         LOGGER.debug("Credentials from " + smssFile + ": user=" + username);
         return new Credentials(username, password);
@@ -162,19 +148,7 @@ public final class SmssCredentialReader {
      * blank PASSWORD is preserved as the empty H2 password.
      */
     static SmssMetadata readMetadata(Path smssFile, String fallbackUser, String fallbackPass) {
-        Map<String, String> values = new LinkedHashMap<>();
-        try {
-            for (String line : Files.readAllLines(smssFile)) {
-                String trimmed = line.trim();
-                if (trimmed.isEmpty() || trimmed.startsWith("#")) continue;
-                String[] parts = trimmed.split("\\s+", 2);
-                String key = parts[0].toUpperCase(Locale.ROOT);
-                String value = parts.length > 1 ? parts[1].trim() : "";
-                values.put(key, value);
-            }
-        } catch (IOException e) {
-            LOGGER.warn("Error reading .smss file: " + smssFile, e);
-        }
+        Map<String, String> values = loadValues(smssFile);
 
         String username = values.getOrDefault("USERNAME", fallbackUser);
         if (username == null || username.isBlank()) username = fallbackUser;
@@ -192,6 +166,35 @@ public final class SmssCredentialReader {
                 connectionUrl,
                 rdbmsType,
                 driver);
+    }
+
+    /** Load an SMSS file the way SEMOSS does; keys are upper-cased, values trimmed. */
+    static Map<String, String> loadValues(Path smssFile) {
+        try (InputStream in = Files.newInputStream(smssFile)) {
+            Properties props = new Properties();
+            props.load(in);
+            return upperCaseKeys(props);
+        } catch (IOException | IllegalArgumentException e) {
+            LOGGER.warn("Error reading .smss file: " + smssFile, e);
+            return Map.of();
+        }
+    }
+
+    /** Parse properties text (for example one SMSS line); same rules as {@link #loadValues}. */
+    static Map<String, String> parseValues(String text) throws IOException {
+        Properties props = new Properties();
+        try (Reader reader = new StringReader(text)) {
+            props.load(reader);
+        }
+        return upperCaseKeys(props);
+    }
+
+    private static Map<String, String> upperCaseKeys(Properties props) {
+        Map<String, String> values = new LinkedHashMap<>();
+        for (String name : props.stringPropertyNames()) {
+            values.put(name.toUpperCase(Locale.ROOT), props.getProperty(name).trim());
+        }
+        return values;
     }
 
     private static String detectBackend(String rdbmsType, String driver, String connectionUrl) {

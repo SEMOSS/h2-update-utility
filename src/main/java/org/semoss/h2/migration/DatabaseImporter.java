@@ -3,6 +3,7 @@ package org.semoss.h2.migration;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -51,6 +52,9 @@ public final class DatabaseImporter {
             "DAY", "MONTH", "YEAR", "HOUR", "MINUTE", "SECOND",
             "CURRENT_CATALOG", "CURRENT_PATH");
 
+    /** Suffix of the sibling base name the import is written to before the atomic move. */
+    static final String TEMP_SUFFIX = ".h2-migrating-tmp";
+
     private final IsolatedH2Driver driver;
 
     public DatabaseImporter(IsolatedH2Driver driver) {
@@ -78,33 +82,85 @@ public final class DatabaseImporter {
                 "DATABASE_TO_UPPER=TRUE");
     }
 
-    /**
-     * Import a SQL script into a new H2 2.x database, replacing the original.
-     *
-     * @param dbFile     the original .mv.db file path (will be replaced)
-     * @param scriptFile the exported SQL script
-     * @param username   database username
-     * @param password   database password
-     * @throws SQLException if the import fails
-     * @throws IOException  if file operations fail
-     */
+    /** The .mv.db an import of {@code dbFile} ends up in (a .h2.db source becomes .mv.db). */
+    static Path finalFile(Path dbFile) {
+        return Path.of(DatabaseExporter.stripExtension(dbFile) + DatabaseDiscovery.MV_DB_SUFFIX);
+    }
+
+    /** The sibling temp file the import is written to first. */
+    static Path tempFile(Path dbFile) {
+        return Path.of(DatabaseExporter.stripExtension(dbFile) + TEMP_SUFFIX + DatabaseDiscovery.MV_DB_SUFFIX);
+    }
+
+    /** Import, verify and atomically promote; the original is only replaced by a verified file. */
     public void importDatabase(Path dbFile, Path scriptFile, String username, String password)
             throws SQLException, IOException {
-        // Delete the old database file so H2 2.x creates a fresh one
-        Files.deleteIfExists(dbFile);
+        importToTemp(dbFile, scriptFile, username, password);
+        promote(dbFile);
+        deletePageStoreSource(dbFile);
+    }
 
-        String url = buildTargetUrl(dbFile);
+    /**
+     * Import the script into a sibling temp file and verify it opens as H2 2.x.
+     * The original file is not touched; the temp file is removed on failure.
+     */
+    public Path importToTemp(Path dbFile, Path scriptFile, String username, String password)
+            throws SQLException, IOException {
+        Path temp = tempFile(dbFile);
+        deleteTemp(dbFile);
+        String url = buildTargetUrl(temp);
 
         LOGGER.info("Importing " + scriptFile.getFileName() + " into new H2 " + driver.getVersion() + " database");
         LOGGER.debug("Target URL flags: " + targetUrlFlags());
 
-        try (Connection conn = driver.connect(url, username, password);
-             Statement stmt = conn.createStatement()) {
-            stmt.execute("RUNSCRIPT FROM '" + scriptFile.toAbsolutePath().toString().replace("'", "''") + "' FROM_1X");
+        boolean verified = false;
+        try {
+            try (Connection conn = driver.connect(url, username, password);
+                 Statement stmt = conn.createStatement()) {
+                stmt.execute("RUNSCRIPT FROM '" + scriptFile.toAbsolutePath().toString().replace("'", "''") + "' FROM_1X");
+            }
+            smokeOpenUrl(url, username, password);
+            if (!Files.isRegularFile(temp) || H2VersionDetector.detect(temp).needsMigration()) {
+                throw new IOException("Imported temp file is not a readable H2 2.x database: " + temp);
+            }
+            verified = true;
+            LOGGER.info("Imported into " + temp.getFileName() + " (" + Files.size(temp) + " bytes)");
+            return temp;
+        } finally {
+            if (!verified) deleteTemp(dbFile);
         }
+    }
 
-        long size = Files.exists(dbFile) ? Files.size(dbFile) : 0;
-        LOGGER.info("Imported into " + dbFile.getFileName() + " (" + size + " bytes)");
+    /**
+     * Atomically move the verified temp file over the original. For a .h2.db source the
+     * file becomes a new .mv.db sibling, which must not already exist.
+     */
+    public static Path promote(Path dbFile) throws IOException {
+        Path temp = tempFile(dbFile);
+        Path target = finalFile(dbFile);
+        boolean pageStore = dbFile.getFileName().toString().endsWith(DatabaseDiscovery.H2_DB_SUFFIX);
+        if (pageStore && Files.exists(target)) {
+            throw new IOException("Refusing to overwrite existing " + target.getFileName()
+                    + " while migrating " + dbFile.getFileName());
+        }
+        Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        LOGGER.info("Replaced " + dbFile.getFileName() + " with migrated " + target.getFileName());
+        return target;
+    }
+
+    /** After a promote, remove the old .h2.db (a .mv.db source was already replaced). */
+    static void deletePageStoreSource(Path dbFile) throws IOException {
+        if (dbFile.getFileName().toString().endsWith(DatabaseDiscovery.H2_DB_SUFFIX)) {
+            Files.deleteIfExists(dbFile);
+        }
+    }
+
+    /** Remove the temp file and any H2 side files left by an interrupted import. */
+    static void deleteTemp(Path dbFile) throws IOException {
+        String base = DatabaseExporter.stripExtension(dbFile) + TEMP_SUFFIX;
+        Files.deleteIfExists(Path.of(base + DatabaseDiscovery.MV_DB_SUFFIX));
+        Files.deleteIfExists(Path.of(base + ".trace.db"));
+        Files.deleteIfExists(Path.of(base + ".mv.db.tempFile"));
     }
 
     /**
