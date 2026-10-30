@@ -24,7 +24,9 @@ step with the operator; steps marked **GATE** need the operator's explicit OK.
 | Java | 21 or newer (`java -version`) |
 
 Free space in the work folder: about 3x the total size of `*.mv.db` and
-`*.h2.db` files under the home.
+`*.h2.db` files under the home. Free space on the home's own disk: at least the
+largest single H2 file, because each import is written next to its original
+before it replaces it.
 
 ## 1. Stop SEMOSS (GATE)
 
