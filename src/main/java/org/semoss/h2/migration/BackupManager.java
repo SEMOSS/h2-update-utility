@@ -49,20 +49,22 @@ public final class BackupManager {
     }
 
     /**
-     * Restore a previously backed-up file to its original location.
+     * Restore a previously backed-up file to its original location. Only that one
+     * file is written; sibling files are never deleted.
      *
      * @param backupFile the backup file
      * @param originalFile the original location to restore to
      * @throws IOException if the copy fails
      */
     public void restore(Path backupFile, Path originalFile) throws IOException {
-        String originalName = originalFile.getFileName().toString();
-        if (originalName.endsWith(DatabaseDiscovery.H2_DB_SUFFIX)) {
-            String baseName = originalName.substring(
-                    0, originalName.length() - DatabaseDiscovery.H2_DB_SUFFIX.length());
-            Files.deleteIfExists(originalFile.resolveSibling(baseName + DatabaseDiscovery.MV_DB_SUFFIX));
+        // copy next to the original, then swap it in atomically
+        Path temp = originalFile.resolveSibling(originalFile.getFileName() + ".h2-restore-tmp");
+        try {
+            Files.copy(backupFile, temp, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES);
+            Files.move(temp, originalFile, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } finally {
+            Files.deleteIfExists(temp);
         }
-        Files.copy(backupFile, originalFile, StandardCopyOption.REPLACE_EXISTING);
         LOGGER.info("Restored " + backupFile + " -> " + originalFile);
     }
 

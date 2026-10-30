@@ -11,10 +11,14 @@ SEMOSS target class fail closed instead of being opened with guessed credentials
 
 ## Features
 
-- **Local mode**: Scans a directory tree for `.mv.db` / `.h2.db` files and migrates them in-place
+- **Local mode**: Scans a directory tree for `.mv.db` / `.h2.db` files and migrates each one into a
+  verified temp file that atomically replaces the original
 - **Cloud mode**: Uses RClone to discover, download, migrate, and re-upload H2 databases from S3, Azure Blob, GCS, or MinIO
 - **Classloader isolation**: Loads H2 1.4.200 and 2.4.240 simultaneously via separate URLClassLoaders
-- **Automatic backups**: Backs up every database before migration with restore-on-failure
+- **Automatic backups**: Backs up every database before migration; a file is restored only if it
+  was already replaced. The backup directory (default `<db-dir>/.h2-backup`) is never scanned
+- **Safe reruns**: Locked files are refused untouched; a run that was killed mid-file leaves an
+  in-progress marker, and the next run restores that file from its backup and migrates it again
 - **SQL script preservation**: Export scripts are copied to the backup directory for post-mortem analysis
 - **SMSS credential validation**: Reads primary-database credentials only from a
   profile whose type, driver, or URL confirms that it is H2
@@ -80,11 +84,19 @@ java -jar target/h2-migration-service.jar \
 `project/*/app_root/version/*/H2_Store_*.mv.db` files remain migration targets.
 Unknown locations or primary databases without a confirmed H2 `.smss` are
 reported as failures and produce a nonzero exit code, including during dry-run.
-For confirmed H2 profiles, the utility removes the known H2 1.x-only
-`EARLY_FILTER`, `QUERY_CACHE_SIZE`, `LOG`, and `UNDO_LOG` settings from the
+For confirmed H2 profiles, the utility removes the H2 1.x URL settings that
+H2 2.4.240 rejects (for example `MVCC`, `MULTI_THREADED`, `MV_STORE=FALSE`,
+`EARLY_FILTER`, `LOG`, `UNDO_LOG`, `ALIAS_COLUMN_NAME`, `COMPRESS_LOB`,
+`ACCESS_MODE_LOG`; full list in `RuntimeConnectionUrlBuilder`) from the
 persisted `.smss` after a successful database import. The `.smss` is backed up
 first and restored with the database if the update or runtime-open validation
-fails. Dry-run reports the planned settings removal without editing the file.
+fails. A database that is already 2.x still gets its `.smss` URL repaired.
+Dry-run reports the planned settings removal without editing the file.
+`.smss` files are parsed like SEMOSS parses them (`java.util.Properties`,
+ISO-8859-1), and rewritten byte for byte outside the URL.
+
+A `.h2.db` that has a `.mv.db` with the same base name next to it is reported as
+`FAILED` and neither file is touched.
 
 ### Cloud storage layouts
 
@@ -369,6 +381,8 @@ H2MigrationService      ← Orchestrator
     ├── H2VersionDetector       ← Skip already-migrated DBs
     ├── SmssCredentialReader    ← Read DB credentials from .smss
     ├── BackupManager           ← Backup/restore
+    ├── DatabaseLockProbe       ← Refuse files another process holds open
+    ├── MigrationMarker         ← In-progress marker for interrupted-run recovery
     ├── IsolatedH2Driver        ← Classloader isolation
     │   ├── DatabaseExporter    ← SCRIPT TO (H2 1.4.200)
     │   └── DatabaseImporter    ← RUNSCRIPT FROM (H2 2.4.240)
@@ -392,7 +406,7 @@ For help diagnosing and resolving migration issues, see the [H2 Migration Suppor
 
 ### Important: Stop Semoss Before Migrating
 
-H2 databases hold file locks during operation. **All Semoss instances must be stopped** before running the migration tool to avoid corruption or lock conflicts.
+H2 databases hold file locks during operation. **All Semoss instances must be stopped** before running the migration tool to avoid corruption or lock conflicts. The utility checks each file for a lock just before migrating it and reports a locked file as `FAILED` without changing it, but it cannot detect a process that opens a file after that check.
 
 ### Single Node
 

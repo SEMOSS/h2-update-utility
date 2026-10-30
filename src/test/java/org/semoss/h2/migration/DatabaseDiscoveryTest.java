@@ -71,4 +71,20 @@ class DatabaseDiscoveryTest {
         assertTrue(DatabaseDiscovery.findDatabases(empty).isEmpty());
     }
 
+    @Test
+    void findTargets_skipsBackupDirsAndTempImports() throws IOException {
+        Files.createFile(tempDir.resolve("live.mv.db"));
+        Files.createFile(tempDir.resolve("live.h2-migrating-tmp.mv.db"));
+        Path defaultBackup = tempDir.resolve(".h2-backup/migration_1");
+        Files.createDirectories(defaultBackup);
+        Files.createFile(defaultBackup.resolve("live.mv.db"));
+        Path customBackup = tempDir.resolve("my-backups");
+        Files.createDirectories(customBackup);
+        Files.createFile(customBackup.resolve("copy.mv.db"));
+
+        List<DatabaseTarget> found = DatabaseDiscovery.findTargets(tempDir, List.of(customBackup));
+
+        assertEquals(1, found.size());
+        assertEquals("live.mv.db", found.get(0).databaseFile().getFileName().toString());
+    }
 }

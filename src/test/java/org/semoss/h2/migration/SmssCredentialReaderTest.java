@@ -183,4 +183,37 @@ class SmssCredentialReaderTest {
         assertEquals(false, credentials.toString().contains("super-secret"));
         assertEquals(true, credentials.toString().contains("<redacted>"));
     }
+
+    @Test
+    void readMetadata_acceptsCp1252BytesLikeSemoss() throws IOException {
+        Path smss = tempDir.resolve("cp1252.smss");
+        byte[] content = ("#Caf\u00e9 engine\nRDBMS_TYPE\tH2_DB\nUSERNAME\tsa\nPASSWORD\tp\u00e4ss\n"
+                + "CONNECTION_URL\tjdbc:h2:nio:/db\n").getBytes(java.nio.charset.Charset.forName("windows-1252"));
+        Files.write(smss, content);
+
+        var metadata = SmssCredentialReader.readMetadata(smss, "fallback", "fallback");
+
+        assertEquals("H2", metadata.backend());
+        assertEquals("sa", metadata.credentials().username());
+        assertEquals("p\u00e4ss", metadata.credentials().password());
+        assertEquals("jdbc:h2:nio:/db", metadata.connectionUrl());
+    }
+
+    @Test
+    void readMetadata_usesPropertiesSeparatorsAndEscapes() throws IOException {
+        Path smss = tempDir.resolve("props.smss");
+        Files.writeString(smss, """
+                RDBMS_TYPE=H2_DB
+                USERNAME : admin
+                PASSWORD\tse\\\\cret
+                CONNECTION_URL\tjdbc:h2:nio:C:\\\\SEMOSS\\\\db\\\\x
+                """);
+
+        var metadata = SmssCredentialReader.readMetadata(smss, "fallback", "fallback");
+
+        assertEquals("H2", metadata.backend());
+        assertEquals("admin", metadata.credentials().username());
+        assertEquals("se\\cret", metadata.credentials().password());
+        assertEquals("jdbc:h2:nio:C:\\SEMOSS\\db\\x", metadata.connectionUrl());
+    }
 }

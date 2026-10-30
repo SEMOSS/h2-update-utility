@@ -7,8 +7,12 @@ import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
+import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -23,6 +27,8 @@ public final class DatabaseDiscovery {
 
     static final String MV_DB_SUFFIX = ".mv.db";
     static final String H2_DB_SUFFIX = ".h2.db";
+    /** Name of the default backup folder; never scanned, wherever it is. */
+    static final String DEFAULT_BACKUP_DIR_NAME = ".h2-backup";
 
     private DatabaseDiscovery() {}
 
@@ -48,6 +54,33 @@ public final class DatabaseDiscovery {
      * generated databases cannot accidentally inherit an unrelated SMSS.
      */
     public static List<DatabaseTarget> findTargets(Path rootDir) throws IOException {
+        return findTargets(rootDir, List.of());
+    }
+
+    /** As {@link #findTargets(Path)}, skipping the given directories (for example the backup dir). */
+    public static List<DatabaseTarget> findTargets(Path rootDir, Collection<Path> excludedDirs) throws IOException {
+        List<DatabaseTarget> results = new ArrayList<>();
+        Path normalized = walk(rootDir, excludedDirs, file -> {
+            if (isH2Database(file)) results.add(DatabaseClassifier.classify(rootDir.toAbsolutePath().normalize(), file));
+        });
+        results.sort(Comparator.comparing(target -> target.databaseFile().toString()));
+        LOGGER.info("Discovered and classified " + results.size()
+                + " H2 database candidate(s) under " + normalized);
+        return results;
+    }
+
+    /** Find in-progress migration markers left by an interrupted run. */
+    static List<Path> findMarkers(Path rootDir, Collection<Path> excludedDirs) throws IOException {
+        List<Path> markers = new ArrayList<>();
+        walk(rootDir, excludedDirs, file -> {
+            if (MigrationMarker.isMarker(file)) markers.add(file);
+        });
+        markers.sort(Comparator.naturalOrder());
+        return markers;
+    }
+
+    private static Path walk(Path rootDir, Collection<Path> excludedDirs,
+                             Consumer<Path> visitor) throws IOException {
         if (rootDir == null) {
             throw new IllegalArgumentException("rootDir must not be null");
         }
@@ -56,14 +89,25 @@ public final class DatabaseDiscovery {
             throw new IllegalArgumentException("Not a directory: " + normalized);
         }
 
-        List<DatabaseTarget> results = new ArrayList<>();
+        Set<Path> excluded = excludedDirs.stream()
+                .map(p -> p.toAbsolutePath().normalize())
+                .collect(Collectors.toSet());
 
         Files.walkFileTree(normalized, new SimpleFileVisitor<>() {
             @Override
-            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-                if (isH2Database(file)) {
-                    results.add(DatabaseClassifier.classify(normalized, file));
+            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+                Path name = dir.getFileName();
+                boolean backupName = name != null && DEFAULT_BACKUP_DIR_NAME.equals(name.toString());
+                if (!dir.equals(normalized) && (backupName || excluded.contains(dir))) {
+                    LOGGER.info("Not scanning backup directory " + dir);
+                    return FileVisitResult.SKIP_SUBTREE;
                 }
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                visitor.accept(file);
                 return FileVisitResult.CONTINUE;
             }
 
@@ -73,11 +117,7 @@ public final class DatabaseDiscovery {
                 return FileVisitResult.CONTINUE;
             }
         });
-
-        results.sort(Comparator.comparing(target -> target.databaseFile().toString()));
-        LOGGER.info("Discovered and classified " + results.size()
-                + " H2 database candidate(s) under " + normalized);
-        return results;
+        return normalized;
     }
 
     /**
@@ -85,6 +125,8 @@ public final class DatabaseDiscovery {
      */
     static boolean isH2Database(Path file) {
         String name = file.getFileName().toString().toLowerCase();
+        // temp files of an unfinished import are not databases
+        if (name.contains(DatabaseImporter.TEMP_SUFFIX)) return false;
         return name.endsWith(MV_DB_SUFFIX) || name.endsWith(H2_DB_SUFFIX);
     }
 }

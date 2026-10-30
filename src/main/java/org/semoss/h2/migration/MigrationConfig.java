@@ -230,7 +230,7 @@ public record MigrationConfig(
 
                 Local options:
                   --db-dir=PATH            Root directory containing H2 databases (required for local)
-                  --backup-dir=PATH        Backup location (default: <db-dir>/.h2-backup)
+                  --backup-dir=PATH        Backup location (default: <db-dir>/.h2-backup, never scanned)
 
                 Common options:
                   --config=FILE            Load configuration from a properties file
