@@ -1,0 +1,62 @@
+name: Release
+
+# push a tag like v1.2.0 to publish that version
+on:
+  push:
+    tags: [ "v*" ]
+
+permissions:
+  contents: write   # create the GitHub Release
+  packages: write   # deploy to GitHub Packages
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # writes a settings.xml with server "github" authenticated by GITHUB_TOKEN
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: "21"
+          cache: maven
+          server-id: github
+
+      - name: Set version from tag
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Tag $GITHUB_REF_NAME is not vMAJOR.MINOR.PATCH" >&2
+            exit 1
+          fi
+          mvn -B -q org.codehaus.mojo:versions-maven-plugin:2.18.0:set -DnewVersion="$version" -DgenerateBackupPoms=false
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # unit + integration tests, then deploy the shaded jar to GitHub Packages
+      - name: Test and deploy package
+        run: mvn -B deploy
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check the jar runs
+        run: java -jar target/h2-migration-service.jar --help | grep -q -- "--mode=local"
+
+      - name: Checksum
+        working-directory: target
+        run: sha256sum h2-migration-service.jar > h2-migration-service.jar.sha256
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            target/h2-migration-service.jar \
+            target/h2-migration-service.jar.sha256 \
+            --title "h2-migration-service ${{ steps.version.outputs.version }}" \
+            --generate-notes

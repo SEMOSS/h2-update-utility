@@ -19,7 +19,7 @@ step with the operator; steps marked **GATE** need the operator's explicit OK.
 | Item | Example |
 |---|---|
 | SEMOSS home (contains `db/` and `project/`) | `/opt/semosshome`, `C:\SEMOSS` |
-| Utility JAR | `h2-migration-service.jar` (release asset or `mvn clean package`) |
+| Utility JAR | `h2-migration-service.jar` from the [latest release](https://github.com/SEMOSS/h2-update-utility/releases) (check `h2-migration-service.jar.sha256`), or `mvn clean package` |
 | Work folder outside the home | `/opt/h2-upgrade`, `C:\h2-upgrade` |
 | Java | 21 or newer (`java -version`) |
 

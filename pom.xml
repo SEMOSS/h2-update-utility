@@ -14,7 +14,7 @@
         Standalone migration tool for upgrading H2 databases from 1.4.x to 2.x.
         Embeds both H2 driver versions and uses classloader isolation to avoid conflicts.
     </description>
-    <url>https://github.com/SEMOSS/h2-migration-service</url>
+    <url>https://github.com/SEMOSS/h2-update-utility</url>
 
     <licenses>
         <license>
@@ -33,15 +33,24 @@
     </developers>
 
     <scm>
-        <connection>scm:git:https://github.com/SEMOSS/h2-migration-service.git</connection>
-        <developerConnection>scm:git:git@github.com:SEMOSS/h2-migration-service.git</developerConnection>
-        <url>https://github.com/SEMOSS/h2-migration-service</url>
+        <connection>scm:git:https://github.com/SEMOSS/h2-update-utility.git</connection>
+        <developerConnection>scm:git:git@github.com:SEMOSS/h2-update-utility.git</developerConnection>
+        <url>https://github.com/SEMOSS/h2-update-utility</url>
     </scm>
 
     <issueManagement>
         <system>GitHub</system>
-        <url>https://github.com/SEMOSS/h2-migration-service/issues</url>
+        <url>https://github.com/SEMOSS/h2-update-utility/issues</url>
     </issueManagement>
+
+    <!-- release.yml deploys tagged versions here -->
+    <distributionManagement>
+        <repository>
+            <id>github</id>
+            <name>GitHub Packages</name>
+            <url>https://maven.pkg.github.com/SEMOSS/h2-update-utility</url>
+        </repository>
+    </distributionManagement>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
