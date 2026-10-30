@@ -68,13 +68,21 @@ public final class DatabaseCredentialResolver {
         SmssCredentialReader.SmssMetadata selected = null;
         SmssCredentialReader.SmssMetadata firstCandidate = null;
         boolean allCandidatesConfirmedNonH2 = !candidates.isEmpty();
+        // A file directly in db/ shares its directory with every engine profile.
+        // Alphabetical proximity is not an ownership relationship. Match its URL
+        // before relocating it, or the relocation would hide a wrong-profile match.
+        boolean sharedDbDirectory = explicitCandidates == null && isSharedDbDirectory(target.databaseFile());
+        int matchingProfiles = 0;
 
         for (Path candidate : candidates) {
             SmssCredentialReader.SmssMetadata metadata = SmssCredentialReader.readMetadata(
-                    candidate, config.defaultUsername(), config.defaultPassword());
+                    candidate, config.primaryDefaultUsername(), config.defaultPassword());
             if (firstCandidate == null) firstCandidate = metadata;
-            if (metadata.confirmedH2() && selected == null) {
-                selected = metadata;
+            if (metadata.confirmedH2()) {
+                if (!sharedDbDirectory || referencesRootDatabase(metadata.connectionUrl(), target.databaseFile())) {
+                    matchingProfiles++;
+                    if (selected == null) selected = metadata;
+                }
             } else if (!metadata.confirmedH2()) {
                 warnings.add("Ignoring non-H2 SMSS " + candidate + " (backend="
                         + metadata.backend() + ")");
@@ -82,6 +90,13 @@ public final class DatabaseCredentialResolver {
             if (!("POSTGRES".equals(metadata.backend()) || "SQLITE".equals(metadata.backend()))) {
                 allCandidatesConfirmedNonH2 = false;
             }
+        }
+
+        if (sharedDbDirectory && matchingProfiles != 1) {
+            return target.unresolved(matchingProfiles == 0
+                            ? "No H2 SMSS profile references this root-level database file"
+                            : "Multiple H2 SMSS profiles reference this root-level database file; resolve the ambiguity before migration",
+                    null, "UNRESOLVED", warnings);
         }
 
         if (selected == null) {
@@ -133,5 +148,26 @@ public final class DatabaseCredentialResolver {
                 selected.backend(),
                 runtimeUrl,
                 warnings);
+    }
+
+    private static boolean isSharedDbDirectory(Path file) {
+        Path parent = file.getParent();
+        if (parent == null || parent.getFileName() == null) return false;
+        String name = parent.getFileName().toString().toLowerCase(Locale.ROOT);
+        return "db".equals(name) || "semoss-db".equals(name);
+    }
+
+    private static boolean referencesRootDatabase(String url, Path file) {
+        if (url == null || !url.regionMatches(true, 0, "jdbc:h2:", 0, 8)) return false;
+        String location = url.substring(8).split(";", 2)[0].replace('\\', '/');
+        String lower = location.toLowerCase(Locale.ROOT);
+        if (lower.startsWith("tcp:") || lower.startsWith("ssl:") || lower.startsWith("mem:")) return false;
+        if (lower.startsWith("nio:")) location = location.substring(4);
+        String base = DatabaseExporter.stripExtension(file).replace('\\', '/');
+        // Keep the db/<basename> identity when the SEMOSS home has been copied.
+        // This also handles @BaseFolder@/db/<basename> without reading live config.
+        String suffix = "/" + file.getParent().getFileName() + "/"
+                + Path.of(DatabaseExporter.stripExtension(file)).getFileName();
+        return location.equals(base) || location.endsWith(suffix);
     }
 }

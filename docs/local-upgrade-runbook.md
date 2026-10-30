@@ -4,6 +4,12 @@ Upgrades the H2 files of a local SEMOSS home from 1.4.x to 2.4.240 before
 moving to SEMOSS 6.0.0. Written so an AI coding assistant can run it step by
 step with the operator; steps marked **GATE** need the operator's explicit OK.
 
+Files directly under `db/` share a directory with many engine profiles. The
+utility requires exactly one H2 profile whose URL identifies that root-level
+database (preserving `db/<basename>` when the home has been copied). Missing
+or ambiguous matches require manual review; an unrelated profile is never
+selected merely because its name sorts first.
+
 ## Rules for the assistant
 
 - Never run a real migration while any SEMOSS/Tomcat process is using the home.
@@ -15,6 +21,13 @@ step with the operator; steps marked **GATE** need the operator's explicit OK.
 - Report the summary line and every non-`SUCCESS` row of each report verbatim.
 
 ## Inputs
+
+Legacy `TEXT`, `LONGTEXT`, `MEDIUMTEXT`, `TINYTEXT`, and `NTEXT` column types
+are rewritten to `CLOB` before import to preserve H2 1.4 LOB semantics. H2 2.x
+accepting `TEXT` as `VARCHAR` is not sufficient schema preservation. Check JDBC
+column types as well as row values when validating a migrated fixture.
+Files already converted to 2.x are skipped; this change does not repair their
+column types. Test the fix on fresh copies of the pre-migration files.
 
 | Item | Example |
 |---|---|
@@ -76,6 +89,13 @@ Read each report and sort the rows:
 | any other `FAILED` | credentials, corrupt file, missing `.smss` | stop; see the [support guide](h2-migration-support-guide.md) |
 
 Exit code `0` means no failures; `1` means at least one `FAILED` row.
+
+For a confirmed H2 primary profile, an absent username defaults to empty, as
+in H2/SEMOSS. `--default-user=USER` (or `DEFAULT_USER`) explicitly overrides
+that missing value. An explicit blank or named username in the profile is
+preserved. Generated audit/project/frame credentials remain `sa` with an empty
+password; retained system H2 files with only a non-H2 profile still default to
+`sa`. A dry run does not authenticate, so inspect the real-run report as well.
 
 ## 4. Approve the real run (GATE)
 

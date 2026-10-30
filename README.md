@@ -9,6 +9,12 @@ to a version built against H2 2.x. Local migration is intentionally aware of
 the SEMOSS `db/`, `project/`, and `InsightCache/` layouts. Files outside a known
 SEMOSS target class fail closed instead of being opened with guessed credentials.
 
+Files directly under `db/` share a directory with many engine profiles. The
+utility requires exactly one H2 profile whose URL identifies that root-level
+database (preserving `db/<basename>` when the home has been copied). Missing
+or ambiguous matches require manual review; an unrelated profile is never
+selected merely because its name sorts first.
+
 ## Features
 
 - **Local mode**: Scans a directory tree for `.mv.db` / `.h2.db` files and migrates each one into a
@@ -21,7 +27,12 @@ SEMOSS target class fail closed instead of being opened with guessed credentials
   in-progress marker, and the next run restores that file from its backup and migrates it again
 - **SQL script preservation**: Export scripts are copied to the backup directory for post-mortem analysis
 - **SMSS credential validation**: Reads primary-database credentials only from a
-  profile whose type, driver, or URL confirms that it is H2
+  profile whose type, driver, or URL confirms that it is H2. A missing username
+  defaults to empty, matching H2/SEMOSS; an explicit blank stays blank.
+  `--default-user` overrides only a missing username, not a configured one
+- **Text LOB preservation**: Legacy `TEXT`, `LONGTEXT`, `MEDIUMTEXT`, `TINYTEXT`,
+  and `NTEXT` column declarations become explicit `CLOB`, preserving their H2
+  1.4 storage type. Ordinary `VARCHAR` columns remain unchanged
 - **SEMOSS target classification**: Distinguishes system stores, user engines,
   generated audit/insight databases, persisted insight-frame stores, and live
   `InsightCache` files before credentials are selected
@@ -307,7 +318,7 @@ All CLI flags can be set via environment variables (matching Semoss conventions)
 | `DB_DIR` | Local database directory |
 | `BACKUP_DIR` | Backup directory |
 | `DRY_RUN` | `true`/`false` |
-| `DEFAULT_USER` | Fallback DB username (default: `sa`) |
+| `DEFAULT_USER` | Override for an absent primary SMSS username (default: empty); retained system files without an H2 profile default to `sa`. Explicit blank SMSS usernames are preserved |
 | `DEFAULT_PASSWORD` | Fallback DB password (default: empty) |
 | `SEARCH_PATH` | Subdirectory within storage root to search |
 | `CONFIRM_SEMOSS_STOPPED` | Required acknowledgement for actual cloud migration |

@@ -142,6 +142,12 @@ Stop SEMOSS, copy `$W/pre-migration/db` and `$W/pre-migration/project` back
 over the home, and start the previous SEMOSS version. H2 1.4 cannot open 2.x
 files, so the old SEMOSS needs the old files.
 
+Files directly under `db/` share a directory with many engine profiles. The
+utility requires exactly one H2 profile whose URL identifies that root-level
+database (preserving `db/<basename>` when the home has been copied). Missing
+or ambiguous matches require manual review; an unrelated profile is never
+selected merely because its name sorts first.
+
 ## Known limitations (as of 2026-10-30)
 
 Fixed in the utility (no workaround needed): interrupted imports are recovered
@@ -150,6 +156,13 @@ same-base `.mv.db` fails without touching either; the backup dir is not
 rescanned; already-2.x rows still get their `.smss` URL repaired; all H2 1.x
 URL settings 2.4.240 rejects are removed; `.smss` files are read like SEMOSS
 reads them (Java properties, ISO-8859-1), so any code page works.
+Legacy text LOB column aliases (`TEXT`, `LONGTEXT`, `MEDIUMTEXT`, `TINYTEXT`,
+`NTEXT`) are rewritten to `CLOB`, preserving their H2 1.4 type. A missing H2
+SMSS username defaults to empty unless explicitly overridden by `--default-user`
+or `DEFAULT_USER`; a blank configured username remains blank. Generated
+audit/project/frame profiles and retained-system fallback defaults are unchanged.
+Already-converted files are not retroactively repaired for changed column types;
+verify these fixes on fresh copies of the pre-migration files.
 
 | Limitation | What to do |
 |---|---|

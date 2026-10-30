@@ -145,13 +145,13 @@ public final class SmssCredentialReader {
 
     /**
      * Parse credentials and backend indicators from an SMSS file. An explicit
-     * blank PASSWORD is preserved as the empty H2 password.
+     * blank USERNAME or PASSWORD is preserved as empty, as in SEMOSS. Fallbacks
+     * apply only to absent keys.
      */
     static SmssMetadata readMetadata(Path smssFile, String fallbackUser, String fallbackPass) {
         Map<String, String> values = loadValues(smssFile);
 
         String username = values.getOrDefault("USERNAME", fallbackUser);
-        if (username == null || username.isBlank()) username = fallbackUser;
         String password = values.containsKey("PASSWORD") ? values.get("PASSWORD") : fallbackPass;
         String rdbmsType = firstNonBlank(values.get("RDBMS_TYPE"), values.get("DBMS_TYPE"));
         String driver = values.getOrDefault("DRIVER", "");

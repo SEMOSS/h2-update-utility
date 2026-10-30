@@ -26,6 +26,8 @@ import org.apache.logging.log4j.Logger;
  *
  * <p>Category A — legacy data-type aliases (DATETIME → TIMESTAMP, etc.) — are replaced
  * via word-boundary regex outside string/identifier literals.
+ * Legacy text LOB aliases additionally use a stateful column-declaration scanner
+ * to preserve CLOB semantics without rewriting TEXT identifiers or multiline data.
  *
  * <p>Category B — reserved keywords. Most are handled at the target URL with
  * {@code NON_KEYWORDS=…}, but H2 2.x does not allow {@code ROW} to be suppressed
@@ -58,7 +60,7 @@ public final class ScriptRewriter {
 
     /** Key names used in the {@link RewriteReport#replacementsByToken()} map. */
     static final List<String> ALIAS_ORDER = List.of(
-            "DATETIME", "LONGVARCHAR", "LONGVARBINARY", "LONGTEXT",
+            "DATETIME", "LONGVARCHAR", "LONGVARBINARY", "TEXT", "LONGTEXT",
             "MEDIUMTEXT", "TINYTEXT", "NTEXT", "MEDIUMBLOB", "TINYBLOB",
             "NUMBER", "IDENTITY", "ROW");
 
@@ -83,10 +85,8 @@ public final class ScriptRewriter {
         m.put(Pattern.compile("\\bDATETIME\\b", flags), "TIMESTAMP");
         m.put(Pattern.compile("\\bLONGVARCHAR\\b", flags), "VARCHAR");
         m.put(Pattern.compile("\\bLONGVARBINARY\\b", flags), "VARBINARY");
-        m.put(Pattern.compile("\\bLONGTEXT\\b", flags), "CLOB");
-        m.put(Pattern.compile("\\bMEDIUMTEXT\\b", flags), "VARCHAR");
-        m.put(Pattern.compile("\\bTINYTEXT\\b", flags), "VARCHAR");
-        m.put(Pattern.compile("\\bNTEXT\\b", flags), "VARCHAR");
+        // Text LOB aliases are handled only in column type positions, with
+        // lexical state across lines (see LegacyTextTypeRewriter).
         m.put(Pattern.compile("\\bMEDIUMBLOB\\b", flags), "BLOB");
         m.put(Pattern.compile("\\bTINYBLOB\\b", flags), "BLOB");
         m.put(Pattern.compile("\\bNUMBER\\b", flags), "NUMERIC");
@@ -175,6 +175,7 @@ public final class ScriptRewriter {
         List<String> stripped = new ArrayList<>();
         Set<String> uniqueWarnings = new java.util.LinkedHashSet<>();
         long lineCount = 0;
+        LegacyTextTypeRewriter textTypes = new LegacyTextTypeRewriter();
 
         try (BufferedReader reader = Files.newBufferedReader(script, StandardCharsets.UTF_8);
              BufferedWriter writer = Files.newBufferedWriter(tmp, StandardCharsets.UTF_8)) {
@@ -198,7 +199,7 @@ public final class ScriptRewriter {
                 }
 
                 // Category A + B ROW — token rewrites outside quoted regions
-                RewriteResult rr = rewriteLine(line);
+                RewriteResult rr = rewriteLine(line, textTypes);
                 totalReplacements += rr.replacements;
                 for (var e : rr.perToken.entrySet()) {
                     perToken.merge(e.getKey(), e.getValue(), Integer::sum);
@@ -246,6 +247,18 @@ public final class ScriptRewriter {
      * identifiers verbatim. Returns both the transformed text and per-token counts.
      */
     static RewriteResult rewriteLine(String line) {
+        return rewriteLine(line, new LegacyTextTypeRewriter());
+    }
+
+    private static RewriteResult rewriteLine(String line, LegacyTextTypeRewriter textTypes) {
+        RewriteResult text = textTypes.rewrite(line);
+        RewriteResult other = rewriteOtherAliases(text.text());
+        Map<String, Integer> counts = new LinkedHashMap<>(text.perToken());
+        other.perToken().forEach((key, value) -> counts.merge(key, value, Integer::sum));
+        return new RewriteResult(other.text(), text.replacements() + other.replacements(), counts);
+    }
+
+    private static RewriteResult rewriteOtherAliases(String line) {
         StringBuilder out = new StringBuilder(line.length());
         int i = 0;
         int replacements = 0;

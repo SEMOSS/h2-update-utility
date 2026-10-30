@@ -14,7 +14,7 @@ public record MigrationConfig(
         Path dbDir,
         Path backupDir,
         boolean dryRun,
-        String defaultUsername,
+        String defaultUsername, // null means no operator override; see the fallback accessors
         String defaultPassword,
         // Cloud storage fields (used in cloud mode)
         String storageProvider,
@@ -53,6 +53,17 @@ public record MigrationConfig(
     public static final String DEFAULT_RCLONE = "rclone";
     public static final String DEFAULT_GCS_TRANSFER_BACKEND = "rclone";
     public static final String DEFAULT_GCLOUD = "gcloud";
+
+    /** Unset fallback is sa only for retained system files without an H2 profile. */
+    @Override
+    public String defaultUsername() {
+        return defaultUsername == null ? DEFAULT_USERNAME : defaultUsername;
+    }
+
+    /** H2 defaults an omitted SMSS username to empty; preserve explicit overrides. */
+    public String primaryDefaultUsername() {
+        return defaultUsername == null ? "" : defaultUsername;
+    }
 
     /** Backward-compatible constructor for existing callers and fixtures. */
     public MigrationConfig(
@@ -173,7 +184,7 @@ public record MigrationConfig(
                 dbDir,
                 backupDir,
                 bool(p, "DRY_RUN"),
-                p.getProperty("DEFAULT_USER", DEFAULT_USERNAME),
+                p.getProperty("DEFAULT_USER"),
                 p.getProperty("DEFAULT_PASSWORD", DEFAULT_PASSWORD),
                 provider,
                 p.getProperty("S3_REGION", ""),
@@ -235,7 +246,7 @@ public record MigrationConfig(
                 Common options:
                   --config=FILE            Load configuration from a properties file
                   --dry-run                Discover databases and report without migrating
-                  --default-user=USER      Fallback H2 username (default: sa)
+                  --default-user=USER      Missing SMSS username override (default: empty; retained system files: sa)
                   --default-password=PWD   Fallback H2 password (default: empty)
                   --search-path=PATH       Required recognized SEMOSS cloud scope
 

@@ -177,6 +177,20 @@ class SmssCredentialReaderTest {
     }
 
     @Test
+    void readMetadata_preservesBlankUsernameAndOnlyDefaultsMissingKeys() throws IOException {
+        Path smss = tempDir.resolve("blank-user.smss");
+        Files.writeString(smss, "RDBMS_TYPE=H2_DB\nUSERNAME=\nPASSWORD=\n");
+        var blank = SmssCredentialReader.readMetadata(smss, "override", "override-password");
+        assertEquals("", blank.credentials().username());
+        assertEquals("", blank.credentials().password());
+
+        Files.writeString(smss, "RDBMS_TYPE=H2_DB\n");
+        var missing = SmssCredentialReader.readMetadata(smss, "override", "override-password");
+        assertEquals("override", missing.credentials().username());
+        assertEquals("override-password", missing.credentials().password());
+    }
+
+    @Test
     void credentialsToStringRedactsPassword() {
         var credentials = new SmssCredentialReader.Credentials("admin", "super-secret");
 

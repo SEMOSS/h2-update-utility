@@ -4,6 +4,12 @@ This guide explains what can go wrong during H2 database migration (1.4.200 → 
 
 ---
 
+Files directly under `db/` share a directory with many engine profiles. The
+utility requires exactly one H2 profile whose URL identifies that root-level
+database (preserving `db/<basename>` when the home has been copied). Missing
+or ambiguous matches require manual review; an unrelated profile is never
+selected merely because its name sorts first.
+
 ## Quick Reference: Common Issues and Solutions
 
 | Error Message | Likely Cause | Quick Fix |
@@ -41,8 +47,17 @@ The migration utility automatically rewrites the schema export **before** import
 - `DATETIME` → `TIMESTAMP`
 - `LONGVARCHAR` → `VARCHAR`
 - `LONGVARBINARY` → `VARBINARY`
+- `TEXT`, `LONGTEXT`, `MEDIUMTEXT`, `TINYTEXT`, `NTEXT` → `CLOB` in column declarations
 - `NUMBER` → `NUMERIC`
-- And 8 others listed [in the detailed reference](#full-reference)
+- Other conversions are listed [in the detailed reference](#full-reference)
+
+H2 1.4.200 treats these text aliases as CLOB, while 2.4.240 interprets them
+as VARCHAR. This utility preserves the source LOB type with explicit CLOB.
+H2 still recommends CLOB for large text, with streamed access instead of
+loading the whole value into memory; see the official
+[H2 data-type reference](https://h2database.com/html/datatypes.html#character_large_object_type).
+Text-alias rewrites are limited to CREATE TABLE column-type positions and
+preserve identifiers, comments, and literals, including multiline content.
 
 The rewrite is careful: it only touches type declarations, not string literals or function names.
 
@@ -411,10 +426,11 @@ When the rewriter encounters these legacy types, they're automatically converted
 | `DATETIME` | `TIMESTAMP` | Most common; confirmed in the wild |
 | `LONGVARCHAR` | `VARCHAR` | May also use `CLOB` for very large strings |
 | `LONGVARBINARY` | `VARBINARY` | May also use `BLOB` for very large binary |
-| `LONGTEXT` | `CLOB` | Text LOB alias |
-| `MEDIUMTEXT` | `VARCHAR` | Character string |
-| `TINYTEXT` | `VARCHAR` | Small character string |
-| `NTEXT` | `VARCHAR` | National character string |
+| `TEXT` | `CLOB` | Preserve H2 1.4 text LOB column type |
+| `LONGTEXT` | `CLOB` | Preserve H2 1.4 text LOB column type |
+| `MEDIUMTEXT` | `CLOB` | Preserve H2 1.4 text LOB column type |
+| `TINYTEXT` | `CLOB` | Preserve H2 1.4 text LOB column type |
+| `NTEXT` | `CLOB` | Preserve H2 1.4 text LOB column type |
 | `MEDIUMBLOB` | `BLOB` | Binary LOB |
 | `TINYBLOB` | `BLOB` | Small binary LOB |
 | `NUMBER` | `NUMERIC` | Numeric type |
