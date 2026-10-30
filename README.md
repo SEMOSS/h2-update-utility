@@ -45,6 +45,23 @@ SEMOSS target class fail closed instead of being opened with guessed credentials
 - Maven 3.9+ (for building)
 - RClone (for cloud mode only)
 
+## Download
+
+Each tagged version is published as a
+[GitHub Release](https://github.com/SEMOSS/h2-update-utility/releases) with the
+runnable `h2-migration-service.jar` and its SHA-256 checksum:
+
+```bash
+gh release download --repo SEMOSS/h2-update-utility --pattern 'h2-migration-service.jar*'
+shasum -a 256 -c h2-migration-service.jar.sha256
+```
+
+Without a tag, `gh release download` takes the latest release; add one such as
+`v1.2.0` to pin a version. The same JAR is also published to GitHub Packages
+as the Maven artifact `org.semoss:h2-migration-service` (repository
+`https://maven.pkg.github.com/SEMOSS/h2-update-utility`; Maven needs a token
+with `read:packages`).
+
 ## Build
 
 ```bash
@@ -353,6 +370,21 @@ variable `IMAGE_NAME` overrides). Only `main` pushes, tagged `latest` and the
 UTC build date (`YYYY-MM-DD`; a second push that day moves the date tag); pull
 requests build without pushing. Needs the `QUAY_ROBOT_USERNAME` / `QUAY_ROBOT_PASSWORD`
 secrets.
+
+### Releasing the JAR
+
+`.github/workflows/release.yml` runs on a pushed `vMAJOR.MINOR.PATCH` tag. It
+sets the POM version from the tag, runs the unit and integration tests, deploys
+the shaded JAR to GitHub Packages, checks that it runs, and creates a GitHub
+Release with `h2-migration-service.jar` and `h2-migration-service.jar.sha256`.
+It uses the built-in `GITHUB_TOKEN` only. To release, tag a commit on `main`:
+
+```bash
+git tag v1.2.0 origin/main
+git push origin v1.2.0
+```
+
+The `pom.xml` version on `main` stays a `-SNAPSHOT`; bump it after a release.
 
 ### Local volumes with Docker
 

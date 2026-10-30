@@ -63,7 +63,10 @@ Windows: use PowerShell, `$H="C:\SEMOSS"` etc., `robocopy` for copies and
 ### 0. Preflight (no changes yet)
 
 1. `java -version` must report 21 or newer.
-2. Get the JAR into `$W`, either:
+2. Get the JAR into `$W`, one of:
+   - download the release (preferred) and check its checksum:
+     `gh release download --repo SEMOSS/h2-update-utility --pattern 'h2-migration-service.jar*' --dir "$W"`,
+     then `(cd "$W" && shasum -a 256 -c h2-migration-service.jar.sha256)`;
    - build it from this repo: `mvn -q clean package -DskipTests`, then copy
      `target/h2-migration-service.jar`; or
    - copy it out of the published image:
@@ -173,6 +176,8 @@ At the end, give the operator:
 
 - Java 21, Maven 3.9+. Build: `mvn clean package` produces
   `target/h2-migration-service.jar` (both H2 drivers, isolated class loaders).
+- Releases: push a `vMAJOR.MINOR.PATCH` tag on `main`; `release.yml` publishes
+  the JAR as a GitHub Release and to GitHub Packages (README "Releasing the JAR").
 - Tests: `mvn test` (unit), `mvn verify` (adds the local and local-filesystem
   cloud integration suites). Never point tests at a working SEMOSS home; use
   temporary copies.
