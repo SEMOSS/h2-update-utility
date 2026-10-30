@@ -4,6 +4,12 @@ This guide explains what can go wrong during H2 database migration (1.4.200 → 
 
 ---
 
+Files directly under `db/` share a directory with many engine profiles. The
+utility requires exactly one H2 profile whose URL identifies that root-level
+database (preserving `db/<basename>` when the home has been copied). Missing
+or ambiguous matches require manual review; an unrelated profile is never
+selected merely because its name sorts first.
+
 ## Quick Reference: Common Issues and Solutions
 
 | Error Message | Likely Cause | Quick Fix |

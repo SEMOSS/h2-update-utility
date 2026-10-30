@@ -121,6 +121,37 @@ class LocalMigrationIT {
         );
     }
 
+    @Test
+    void rootLevelDatabaseMigratesWithOwningProfileAndLeavesUnrelatedProfileUntouched() throws Exception {
+        Path unrelated = dbDir.resolve("A-unrelated.smss");
+        String unrelatedText = "RDBMS_TYPE=H2_DB\nUSERNAME=wrong\nPASSWORD=wrong\n"
+                + "CONNECTION_URL=jdbc:h2:nio:@BaseFolder@/db/other/database;EARLY_FILTER=TRUE\n";
+        Files.writeString(unrelated, unrelatedText);
+        Path owner = dbDir.resolve("Z-fixture.smss");
+        Files.writeString(owner, "RDBMS_TYPE=H2_DB\nUSERNAME=fixture\nPASSWORD=fixture-password\n"
+                + "CONNECTION_URL=jdbc:h2:nio:@BaseFolder@/db/root_fixture;EARLY_FILTER=TRUE\n");
+        String base = dbDir.resolve("root_fixture").toString();
+        try (IsolatedH2Driver old = IsolatedH2Driver.load("1.4.200");
+             Connection conn = old.connect("jdbc:h2:" + base, "fixture", "fixture-password");
+             Statement stmt = conn.createStatement()) {
+            stmt.execute("CREATE TABLE SAMPLE(ID INT PRIMARY KEY, BODY TEXT)");
+            stmt.execute("INSERT INTO SAMPLE VALUES(1, 'preserved text')");
+        }
+        H2MigrationService service = new H2MigrationService(localConfig(dbDir));
+        assertEquals(0, service.run());
+        assertEquals(1, service.getReport().successCount());
+        assertEquals(unrelatedText, Files.readString(unrelated));
+        assertFalse(Files.readString(owner).contains("EARLY_FILTER"));
+        try (IsolatedH2Driver migrated = IsolatedH2Driver.load("2.4.240");
+             Connection conn = migrated.connect("jdbc:h2:" + base, "fixture", "fixture-password");
+             Statement stmt = conn.createStatement();
+             ResultSet rows = stmt.executeQuery("SELECT BODY FROM SAMPLE WHERE ID=1")) {
+            assertTrue(rows.next());
+            assertEquals("preserved text", rows.getString(1));
+            assertEquals(java.sql.Types.CLOB, rows.getMetaData().getColumnType(1));
+        }
+    }
+
     private void writeSmss(Path smssFile, String engineId, String engineAlias,
                            String username, String password, String dbRelPath) throws IOException {
         String content = """

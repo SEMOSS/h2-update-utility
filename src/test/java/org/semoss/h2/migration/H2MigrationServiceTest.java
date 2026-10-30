@@ -604,13 +604,17 @@ class H2MigrationServiceTest {
     }
 
     private void writeH2Smss(Path smssFile, String username, String password) throws Exception {
+        String name = smssFile.getFileName().toString().replaceFirst("\\.smss$", "");
+        Path rootFile = smssFile.resolveSibling(name + ".mv.db");
+        String location = Files.exists(rootFile)
+                ? DatabaseExporter.stripExtension(rootFile.toAbsolutePath()) : "/ignored/database";
         Files.writeString(smssFile, """
                 RDBMS_TYPE\tH2_DB
                 DRIVER\torg.h2.Driver
                 USERNAME\t%s
                 PASSWORD\t%s
-                CONNECTION_URL\tjdbc:h2:nio:/ignored/database
-                """.formatted(username, password));
+                CONNECTION_URL\tjdbc:h2:nio:%s
+                """.formatted(username, password, location));
     }
 
     @Test

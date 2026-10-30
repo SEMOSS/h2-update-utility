@@ -139,6 +139,12 @@ Stop SEMOSS, copy `$W/pre-migration/db` and `$W/pre-migration/project` back
 over the home, and start the previous SEMOSS version. H2 1.4 cannot open 2.x
 files, so the old SEMOSS needs the old files.
 
+Files directly under `db/` share a directory with many engine profiles. The
+utility requires exactly one H2 profile whose URL identifies that root-level
+database (preserving `db/<basename>` when the home has been copied). Missing
+or ambiguous matches require manual review; an unrelated profile is never
+selected merely because its name sorts first.
+
 ## Known limitations (as of 2026-10-30)
 
 Fixed in the utility (no workaround needed): interrupted imports are recovered

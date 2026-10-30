@@ -4,6 +4,12 @@ Upgrades the H2 files of a local SEMOSS home from 1.4.x to 2.4.240 before
 moving to SEMOSS 6.0.0. Written so an AI coding assistant can run it step by
 step with the operator; steps marked **GATE** need the operator's explicit OK.
 
+Files directly under `db/` share a directory with many engine profiles. The
+utility requires exactly one H2 profile whose URL identifies that root-level
+database (preserving `db/<basename>` when the home has been copied). Missing
+or ambiguous matches require manual review; an unrelated profile is never
+selected merely because its name sorts first.
+
 ## Rules for the assistant
 
 - Never run a real migration while any SEMOSS/Tomcat process is using the home.

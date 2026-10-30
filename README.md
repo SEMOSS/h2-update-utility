@@ -9,6 +9,12 @@ to a version built against H2 2.x. Local migration is intentionally aware of
 the SEMOSS `db/`, `project/`, and `InsightCache/` layouts. Files outside a known
 SEMOSS target class fail closed instead of being opened with guessed credentials.
 
+Files directly under `db/` share a directory with many engine profiles. The
+utility requires exactly one H2 profile whose URL identifies that root-level
+database (preserving `db/<basename>` when the home has been copied). Missing
+or ambiguous matches require manual review; an unrelated profile is never
+selected merely because its name sorts first.
+
 ## Features
 
 - **Local mode**: Scans a directory tree for `.mv.db` / `.h2.db` files and migrates each one into a
