@@ -33,6 +33,25 @@ class CloudStorageLayoutTest {
     }
 
     @Test
+    void workPathsKeepEngineAndProjectWithSameIdApart() {
+        var engine = CloudStorageLayout.fromConfig(config("gcs", "semoss-db"))
+                .groupDatabases(List.of("same-id/database.mv.db"), tempDir).get(0);
+        var project = CloudStorageLayout.fromConfig(config("gcs", "semoss-project"))
+                .groupDatabases(List.of("same-id/insights_database.mv.db"), tempDir).get(0);
+        var dbLayout = CloudStorageLayout.fromConfig(config("gcs", "semoss-db"));
+        var projectLayout = CloudStorageLayout.fromConfig(config("gcs", "semoss-project"));
+
+        assertEquals("bucket/_semoss-h2-migration/run-1/backup/semoss-db/same-id/database.mv.db",
+                dbLayout.backupPath("run-1", engine, "database.mv.db"));
+        assertEquals("bucket/_semoss-h2-migration/run-1/backup/semoss-db/same-id-smss/same-id.smss",
+                dbLayout.backupSmssPath("run-1", engine, "same-id.smss"));
+        assertEquals("bucket/_semoss-h2-migration/run-1/backup/semoss-project/same-id/insights_database.mv.db",
+                projectLayout.backupPath("run-1", project, "insights_database.mv.db"));
+        assertEquals("bucket/_semoss-h2-migration/run-1/candidate/semoss-project/same-id/insights_database.mv.db",
+                projectLayout.candidatePath("run-1", project, "insights_database.mv.db"));
+    }
+
+    @Test
     void projectScopePreservesSavedFramePath() {
         CloudStorageLayout layout = CloudStorageLayout.fromConfig(
                 config("gcs", "semoss-project/project-a"));

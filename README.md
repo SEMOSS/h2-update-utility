@@ -302,7 +302,7 @@ written to the report.
 
 Actual cloud runs create a verified remote backup before replacing any source
 object. S3, MinIO, and GCS retain backups under
-`_semoss-h2-migration/<runId>/backup`; Azure retains them in the
+`_semoss-h2-migration/<runId>/backup/<semoss-db|semoss-project>/<id>`; Azure retains them in the
 `semoss-h2-migration` container. Candidate objects are removed after successful
 scope verification, while backups remain until an operator deliberately removes
 them. If publication fails after promotion begins, every changed object in that
@@ -366,7 +366,7 @@ through `/app/migrate-all.sh`:
   scope under `/work/<runId>/<scope>/`. Staging and local backups are deleted
   per engine/project once it finishes; a failed one keeps its local backups. Each report is also printed to the Job
   log between `=== BEGIN REPORT <scope>` and `=== END REPORT <scope>`. Durable
-  backups live in the bucket under `_semoss-h2-migration/<runId>/backup`
+  backups live in the bucket under `_semoss-h2-migration/<runId>/backup/<semoss-db|semoss-project>/<id>`
   (Azure: `semoss-h2-migration`).
 - A dry run checks every scope; a real run stops at the first failed scope.
   Exit code `1` (Job `Failed`) means at least one target failed.
