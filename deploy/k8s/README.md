@@ -23,8 +23,8 @@ One Job runs every scope in order (`semoss-db`, then `semoss-project`) through
   (Azure: `semoss-h2-migration` container).
 - Azure: set `SCOPES` to every `db-<engineId>` and `project-<projectId>`
   container; the utility handles one container per invocation.
-- Size `/work` (`emptyDir` `sizeLimit` and ephemeral-storage, or the PVC) for about 3x the largest single engine/project scope; staging is
-  cleared between scopes.
+- Size `/work` (`emptyDir` `sizeLimit` and ephemeral-storage, or the PVC) for about 3x the largest single engine/project scope; each scope's
+  local files are deleted once it finishes (a failed scope keeps its local backups).
 
 ## Run
 

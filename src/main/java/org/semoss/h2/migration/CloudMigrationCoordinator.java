@@ -115,14 +115,21 @@ final class CloudMigrationCoordinator {
                         "Actual cloud migration scope contains no H2 database objects");
             }
             for (CloudStorageLayout.ScopeDescriptor scope : scopes) {
-                processScope(scope);
+                // free each scope's local copies once done; the bucket holds originals/backups
+                boolean failed = processScope(scope);
+                if (failed) {
+                    LOGGER.warn("Keeping local backups of failed scope " + scope.key().type()
+                            + " " + scope.key().id());
+                }
+                cleanupScope(scope, failed);
             }
         } finally {
             cleanupStaging();
         }
     }
 
-    private void processScope(CloudStorageLayout.ScopeDescriptor descriptor)
+    /** Returns true when the scope has a FAILED row that touched local files, so its local backups are kept. */
+    private boolean processScope(CloudStorageLayout.ScopeDescriptor descriptor)
             throws IOException, InterruptedException {
         long scopeStart = System.currentTimeMillis();
         PreparedScope scope;
@@ -135,7 +142,7 @@ final class CloudMigrationCoordinator {
                     .cloudIdentity(layout.provider().name(), objectStore.authenticationMode(),
                             descriptor.key().type().name(), descriptor.key().id(),
                             descriptor.sourceRoot());
-            return;
+            return false;
         }
 
         Path originalsRoot = descriptor.localRoot().resolve(".migration-originals");
@@ -183,7 +190,7 @@ final class CloudMigrationCoordinator {
         }
 
         boolean localFailure = targets.stream().anyMatch(work -> work.result().status() == Status.FAILED);
-        if (config.dryRun()) return;
+        if (config.dryRun()) return localFailure;
         if (localFailure) {
             for (TargetWork work : targets) {
                 if (work.result().status() == Status.SUCCESS) {
@@ -192,12 +199,12 @@ final class CloudMigrationCoordinator {
                             .promotionStatus("NOT_STARTED");
                 }
             }
-            return;
+            return true;
         }
 
         List<Publication> publications = buildPublications(descriptor, targets, smss);
-        if (publications.isEmpty()) return;
-        publishScope(descriptor, publications);
+        if (!publications.isEmpty()) publishScope(descriptor, publications);
+        return targets.stream().anyMatch(work -> work.result().status() == Status.FAILED);
     }
 
     private List<Publication> buildPublications(CloudStorageLayout.ScopeDescriptor scope,
@@ -370,12 +377,42 @@ final class CloudMigrationCoordinator {
     }
 
     private void cleanupStaging() {
-        try (var paths = Files.walk(stagingRoot)) {
+        deleteTree(stagingRoot);
+    }
+
+    // staging copies of one scope always; its local backups and export scripts unless kept
+    private void cleanupScope(CloudStorageLayout.ScopeDescriptor scope, boolean keepBackups) {
+        Path dbRel = stagingRoot.relativize(scope.localRoot().toAbsolutePath().normalize());
+        Path smssRel = stagingRoot.relativize(
+                layout.smssLocalRoot(stagingRoot, scope.key()).toAbsolutePath().normalize());
+        Path backupRun = config.backupDir().resolve(runId);
+        List<Path> dirs = new ArrayList<>(List.of(
+                stagingRoot.resolve(dbRel), stagingRoot.resolve(smssRel)));
+        if (!keepBackups) {
+            dirs.addAll(List.of(backupRun.resolve(dbRel), backupRun.resolve(smssRel),
+                    backupRun.resolve("scripts").resolve(dbRel)));
+        }
+        Path verification = stagingRoot.resolve("verification");
+        if (Files.isDirectory(verification)) {
+            try (var stages = Files.list(verification)) {
+                stages.forEach(stage -> dirs.add(stage
+                        .resolve(scope.key().type().name().toLowerCase())
+                        .resolve(scope.key().id())));
+            } catch (IOException e) {
+                LOGGER.warn("Failed to list " + verification, e);
+            }
+        }
+        for (Path dir : dirs) deleteTree(dir);
+    }
+
+    private static void deleteTree(Path root) {
+        if (!Files.exists(root)) return;
+        try (var paths = Files.walk(root)) {
             for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
                 Files.deleteIfExists(path);
             }
         } catch (IOException e) {
-            LOGGER.warn("Failed to remove cloud staging directory " + stagingRoot, e);
+            LOGGER.warn("Failed to remove " + root, e);
         }
     }
 

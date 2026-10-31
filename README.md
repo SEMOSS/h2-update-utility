@@ -363,7 +363,8 @@ through `/app/migrate-all.sh`:
   with `DRY_RUN=false` and `CONFIRM_SEMOSS_STOPPED=true`.
 - A scratch `emptyDir` at `/work` (a PVC option is commented in `job.yaml`)
   holds download staging (`java.io.tmpdir`), local backups and one report per
-  scope under `/work/<runId>/<scope>/`. Each report is also printed to the Job
+  scope under `/work/<runId>/<scope>/`. Staging and local backups are deleted
+  per engine/project once it finishes; a failed one keeps its local backups. Each report is also printed to the Job
   log between `=== BEGIN REPORT <scope>` and `=== END REPORT <scope>`. Durable
   backups live in the bucket under `_semoss-h2-migration/<runId>/backup`
   (Azure: `semoss-h2-migration`).

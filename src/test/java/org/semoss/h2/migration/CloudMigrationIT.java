@@ -74,6 +74,8 @@ class CloudMigrationIT {
                 .anyMatch(path -> Files.isRegularFile(path)
                         && path.toString().contains("/candidate/")));
         assertTrue(service.getReport().toJson().contains("\"promotionStatus\": \"VERIFIED\""));
+        // finished scope's local backup and export script are removed
+        assertFalse(hasLocalBackupFiles());
     }
 
     @Test
@@ -111,6 +113,17 @@ class CloudMigrationIT {
         assertEquals(originalDb, CloudDatabaseDiscovery.sha256(fixture.databaseFile()));
         assertEquals(originalSmss, CloudDatabaseDiscovery.sha256(fixture.smssFile()));
         assertTrue(service.getReport().toJson().contains("\"rollbackStatus\": \"VERIFIED\""));
+        // failed scope keeps its local backup for inspection
+        assertTrue(hasLocalBackupFiles());
+    }
+
+    private boolean hasLocalBackupFiles() throws Exception {
+        Path backup = tempDir.resolve("local-backup");
+        if (!Files.exists(backup)) return false;
+        try (var paths = Files.walk(backup)) {
+            return paths.anyMatch(path -> Files.isRegularFile(path)
+                    && !path.getFileName().toString().equals("migration-report.json"));
+        }
     }
 
     @Test
