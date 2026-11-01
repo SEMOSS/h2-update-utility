@@ -33,6 +33,7 @@ public record DatabaseTarget(
         PROJECT_INSIGHTS_H2,
         PERSISTED_INSIGHT_FRAME_H2,
         TRANSIENT_INSIGHT_CACHE_H2,
+        MACOS_METADATA,
         UNKNOWN_H2
     }
 

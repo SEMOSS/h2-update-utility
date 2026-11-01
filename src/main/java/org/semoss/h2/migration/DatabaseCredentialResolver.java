@@ -48,7 +48,7 @@ public final class DatabaseCredentialResolver {
                     List.of());
             case SYSTEM_H2, USER_ENGINE_H2 -> resolvePrimary(
                     target, config, explicitPrimarySmssCandidates);
-            case TRANSIENT_INSIGHT_CACHE_H2, UNKNOWN_H2 -> target;
+            case TRANSIENT_INSIGHT_CACHE_H2, MACOS_METADATA, UNKNOWN_H2 -> target;
         };
     }
 

@@ -37,6 +37,9 @@ selected merely because its name sorts first.
   ordinals that 2.x reads as 1-based; each ordinal becomes its label so values
   never shift. Indexes on `NULL`-typed columns (always NULL; 2.x cannot index
   them) are stripped. A never-initialized file is exported from a scratch copy
+- **macOS metadata skip**: AppleDouble sidecars (`._*.mv.db`, anything under
+  `__MACOSX/`, or content starting `00 05 16 07`) are reported `SKIPPED` as
+  `MACOS_METADATA` and left in place instead of failing their engine/project
 - **SEMOSS target classification**: Distinguishes system stores, user engines,
   generated audit/insight databases, persisted insight-frame stores, and live
   `InsightCache` files before credentials are selected

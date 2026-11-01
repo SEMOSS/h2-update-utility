@@ -1,5 +1,8 @@
 package org.semoss.h2.migration;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -46,6 +49,14 @@ public final class DatabaseClassifier {
         boolean underProject = contains(context, "project") || contains(context, "semoss-project");
         boolean underDb = contains(context, "db") || contains(context, "semoss-db");
 
+        // macOS AppleDouble sidecar (._name, __MACOSX/); SEMOSS never opens it
+        if (fileName.startsWith("._") || contains(context, "__macosx") || isAppleDouble(file)) {
+            return DatabaseTarget.discovered(file, TargetType.MACOS_METADATA,
+                    Disposition.SKIP, RuntimeProfile.NONE)
+                    .skipped("macOS metadata file (AppleDouble), not an H2 database; left in place",
+                            null, null, List.of());
+        }
+
         if (underInsightCache) {
             return DatabaseTarget.discovered(file, TargetType.TRANSIENT_INSIGHT_CACHE_H2,
                     Disposition.SKIP, RuntimeProfile.NONE);
@@ -84,6 +95,17 @@ public final class DatabaseClassifier {
 
         return DatabaseTarget.discovered(file, TargetType.UNKNOWN_H2,
                 Disposition.MANUAL_REVIEW, RuntimeProfile.NONE);
+    }
+
+    private static final byte[] APPLE_DOUBLE_MAGIC = {0x00, 0x05, 0x16, 0x07};
+
+    static boolean isAppleDouble(Path file) {
+        if (!Files.isRegularFile(file)) return false;
+        try (InputStream in = Files.newInputStream(file)) {
+            return java.util.Arrays.equals(in.readNBytes(4), APPLE_DOUBLE_MAGIC);
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     private static boolean contains(List<String> parts, String expected) {

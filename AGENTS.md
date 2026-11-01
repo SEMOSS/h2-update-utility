@@ -164,7 +164,9 @@ audit/project/frame profiles and retained-system fallback defaults are unchanged
 ENUM ordinals are rewritten to labels (H2 1.4 dumps 0-based ordinals that 2.x
 reads as 1-based, which silently shifted values on tables without a `0`),
 indexes on `NULL`-typed columns are stripped, and a never-initialized file is
-exported from a scratch copy instead of failing read-only.
+exported from a scratch copy instead of failing read-only. macOS metadata
+sidecars (`._*.mv.db`, `__MACOSX/`) are `SKIPPED` as `MACOS_METADATA` and left
+in place; they no longer block their engine or project.
 Already-converted files are not retroactively repaired for changed column types;
 verify these fixes on fresh copies of the pre-migration files.
 
