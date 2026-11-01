@@ -98,6 +98,11 @@ public final class IsolatedH2Driver implements AutoCloseable {
         return conn;
     }
 
+    /** For tests that need H2 internals (e.g. a bare MVStore file). */
+    ClassLoader classLoader() {
+        return classLoader;
+    }
+
     public String getVersion() {
         return version;
     }

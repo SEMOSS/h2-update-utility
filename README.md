@@ -33,6 +33,10 @@ selected merely because its name sorts first.
 - **Text LOB preservation**: Legacy `TEXT`, `LONGTEXT`, `MEDIUMTEXT`, `TINYTEXT`,
   and `NTEXT` column declarations become explicit `CLOB`, preserving their H2
   1.4 storage type. Ordinary `VARCHAR` columns remain unchanged
+- **ENUM and NULL-type repair**: H2 1.4 `SCRIPT` writes ENUM values as 0-based
+  ordinals that 2.x reads as 1-based; each ordinal becomes its label so values
+  never shift. Indexes on `NULL`-typed columns (always NULL; 2.x cannot index
+  them) are stripped. A never-initialized file is exported from a scratch copy
 - **SEMOSS target classification**: Distinguishes system stores, user engines,
   generated audit/insight databases, persisted insight-frame stores, and live
   `InsightCache` files before credentials are selected

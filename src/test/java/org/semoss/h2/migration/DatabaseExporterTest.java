@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.Statement;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -61,6 +62,27 @@ class DatabaseExporterTest {
 
             assertTrue(Files.exists(script));
             assertTrue(Files.size(script) > 0, "Even empty DB produces some SQL");
+        }
+    }
+
+    @Test
+    void export_uninitializedFile_usesScratchCopyAndLeavesSourceAlone() throws Exception {
+        try (IsolatedH2Driver oldH2 = IsolatedH2Driver.load("1.4.200")) {
+            // a bare MVStore with no schema or user, like a never-used SEMOSS audit log
+            Path dbFile = tempDir.resolve("bare.mv.db");
+            Class<?> store = oldH2.classLoader().loadClass("org.h2.mvstore.MVStore");
+            Object opened = store.getMethod("open", String.class).invoke(null, dbFile.toString());
+            store.getMethod("close").invoke(opened);
+            byte[] before = Files.readAllBytes(dbFile);
+            Path work = Files.createDirectories(tempDir.resolve("work"));
+
+            Path script = new DatabaseExporter(oldH2).export(dbFile, work.resolve("bare.sql"), "sa", "");
+
+            assertTrue(Files.readString(script).contains("CREATE USER"));
+            assertTrue(java.util.Arrays.equals(before, Files.readAllBytes(dbFile)), "source must not change");
+            try (var files = Files.list(work)) {
+                assertEquals(java.util.List.of(script), files.toList(), "scratch copy is removed");
+            }
         }
     }
 

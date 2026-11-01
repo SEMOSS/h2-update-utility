@@ -161,6 +161,10 @@ Legacy text LOB column aliases (`TEXT`, `LONGTEXT`, `MEDIUMTEXT`, `TINYTEXT`,
 SMSS username defaults to empty unless explicitly overridden by `--default-user`
 or `DEFAULT_USER`; a blank configured username remains blank. Generated
 audit/project/frame profiles and retained-system fallback defaults are unchanged.
+ENUM ordinals are rewritten to labels (H2 1.4 dumps 0-based ordinals that 2.x
+reads as 1-based, which silently shifted values on tables without a `0`),
+indexes on `NULL`-typed columns are stripped, and a never-initialized file is
+exported from a scratch copy instead of failing read-only.
 Already-converted files are not retroactively repaired for changed column types;
 verify these fixes on fresh copies of the pre-migration files.
 
@@ -170,6 +174,8 @@ verify these fixes on fresh copies of the pre-migration files.
 | A row `FAILED` with "Both X.h2.db and X.mv.db exist" needs a human choice of which file SEMOSS really uses. | Report it; the operator decides and moves the other file out before a rerun. |
 | A row `FAILED` with "Interrupted migration could not be recovered" means the backup named in the marker is gone or unreadable. | Stop; restore that database from `pre-migration`, then ask the operator. Do not delete the `.h2-migrating` marker. |
 | `.smss` URL settings outside the known H2 1.x list are kept. A custom or unknown setting can still make SEMOSS log `90113`. | Report the engine and setting to the operator. Do not edit the `.smss` yourself. |
+| A row `FAILED` with `Generated column "..." cannot be assigned`: H2 1.4 dumps computed-column values, which 2.x refuses. | Report the row to the operator; the file is left unchanged. |
+| A row `FAILED` with `Index on column ... NULL` from a `UNIQUE`/primary/foreign key constraint on a `NULL`-typed column (plain indexes are handled). | Report the row to the operator. |
 | A `.smss` whose `CONNECTION_URL` is repeated or continued over several lines is not rewritten; that row fails and is restored. | Report the row to the operator. |
 
 Error codes and fixes are in the

@@ -16,6 +16,7 @@ import org.semoss.h2.migration.ScriptRewriter.RewriteReport;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ScriptRewriterTest {
@@ -406,6 +407,185 @@ class ScriptRewriterTest {
         assertTrue(report.warnings().stream().anyMatch(w -> w.contains("CREATE SEQUENCE")));
         assertTrue(report.warnings().stream().anyMatch(w -> w.contains("GROUP_CONCAT")));
         assertTrue(report.warnings().stream().anyMatch(w -> w.contains("CASEWHEN")));
+    }
+
+    // --- ENUM ordinals and NULL-typed columns (H2 1.4 SCRIPT shapes) ---
+
+    @Test
+    void enumOrdinalsBecomeLabels() throws IOException {
+        Path script = tempDir.resolve("enum.sql");
+        Files.writeString(script, String.join("\n",
+                "CREATE CACHED TABLE \"PUBLIC\".\"T\"(",
+                "    \"ID\" INT,",
+                "    \"R\" ENUM('A', 'B', 'O''K') DEFAULT 'B',",
+                "    \"NOTE\" VARCHAR(100)",
+                ");",
+                "INSERT INTO \"PUBLIC\".\"T\" VALUES",
+                "(1, 0, 'x, (1, 2)'),",
+                "(2, 2, 'multi",
+                "line, 7'),",
+                "(3, NULL, STRINGDECODE('a\\nb')),",
+                "(4, 1, NULL);",
+                ""), StandardCharsets.UTF_8);
+
+        RewriteReport report = ScriptRewriter.rewriteAndScanInPlace(script);
+
+        String out = Files.readString(script);
+        assertTrue(out.contains("(1, 'A', 'x, (1, 2)'),"), out);
+        assertTrue(out.contains("(2, 'O''K', 'multi\nline, 7'),"), out);
+        assertTrue(out.contains("(3, NULL, STRINGDECODE('a\\nb')),"), out);
+        assertTrue(out.contains("(4, 'B', NULL);"), out);
+        assertTrue(out.contains("ENUM('A', 'B', 'O''K') DEFAULT 'B'"), out);
+        assertEquals(3, report.replacementsByToken().get("ENUM_ORDINAL"));
+        assertTrue(report.warnings().stream().anyMatch(w -> w.contains("ENUM ordinal")));
+    }
+
+    @Test
+    void enumOrdinalsFollowAnInsertColumnList() throws IOException {
+        Path script = tempDir.resolve("enum-cols.sql");
+        Files.writeString(script, String.join("\n",
+                "CREATE MEMORY TABLE PUBLIC.T(ID INT, R ENUM('A', 'B'));",
+                "INSERT INTO PUBLIC.T(R, ID) VALUES (1, 0), (0, 1);",
+                ""), StandardCharsets.UTF_8);
+
+        ScriptRewriter.rewriteAndScanInPlace(script);
+
+        assertTrue(Files.readString(script).contains("VALUES ('B', 0), ('A', 1);"));
+    }
+
+    @Test
+    void enumOrdinalOutOfRangeFailsInsteadOfGuessing() throws IOException {
+        Path script = tempDir.resolve("enum-range.sql");
+        Files.writeString(script, "CREATE TABLE T(R ENUM('A'));\nINSERT INTO T VALUES (1);\n",
+                StandardCharsets.UTF_8);
+
+        assertThrows(IOException.class, () -> ScriptRewriter.rewriteAndScanInPlace(script));
+    }
+
+    @Test
+    void enumOutsideTableColumnFails() throws IOException {
+        Path script = tempDir.resolve("enum-domain.sql");
+        Files.writeString(script, "CREATE DOMAIN D AS ENUM('A', 'B');\nCREATE TABLE T(R D);\n",
+                StandardCharsets.UTF_8);
+
+        assertThrows(IOException.class, () -> ScriptRewriter.rewriteAndScanInPlace(script));
+    }
+
+    @Test
+    void enumWordInsideStringsAndCommentsIsIgnored() throws IOException {
+        Path script = tempDir.resolve("enum-text.sql");
+        Files.writeString(script, String.join("\n",
+                "-- ENUM('X') in a comment",
+                "CREATE TABLE T(ID INT, Q VARCHAR);",
+                "INSERT INTO T VALUES (1, 'ENUM(''A'')');",
+                ""), StandardCharsets.UTF_8);
+
+        RewriteReport report = ScriptRewriter.rewriteAndScanInPlace(script);
+
+        assertFalse(report.replacementsByToken().containsKey("ENUM_ORDINAL"));
+    }
+
+    @Test
+    void indexOnNullTypedColumnIsStripped() throws IOException {
+        Path script = tempDir.resolve("null-type.sql");
+        Files.writeString(script, String.join("\n",
+                "CREATE CACHED TABLE \"PUBLIC\".\"E\"(",
+                "    \"ID\" INTEGER,",
+                "    \"ID_FK\" NULL",
+                ");",
+                "CREATE INDEX \"PUBLIC\".\"E_INDX_0\" ON \"PUBLIC\".\"E\"(\"ID\");",
+                "CREATE INDEX \"PUBLIC\".\"E_INDX_1\" ON \"PUBLIC\".\"E\"(\"ID_FK\");    ",
+                ""), StandardCharsets.UTF_8);
+
+        RewriteReport report = ScriptRewriter.rewriteAndScanInPlace(script);
+
+        String out = Files.readString(script);
+        assertTrue(out.contains("\nCREATE INDEX \"PUBLIC\".\"E_INDX_0\""), out);
+        assertTrue(out.contains("-- [migration] stripped: CREATE INDEX \"PUBLIC\".\"E_INDX_1\""), out);
+        assertTrue(out.contains("\"ID_FK\" NULL"), "column itself is kept");
+        assertEquals(java.util.List.of("PUBLIC.E.ID_FK"), report.strippedIndexes());
+    }
+
+    @Test
+    void legacyEnumAndNullTypeRoundTripThroughBothDrivers() throws Exception {
+        Path dbFile = tempDir.resolve("legacy.mv.db");
+        try (IsolatedH2Driver oldH2 = IsolatedH2Driver.load("1.4.200")) {
+            try (Connection conn = oldH2.connect("jdbc:h2:" + tempDir.resolve("legacy"), "sa", "");
+                 Statement stmt = conn.createStatement()) {
+                stmt.execute("CREATE TABLE T(ID INT, R ENUM('A', 'B', 'C'), FK NULL)");
+                stmt.execute("CREATE INDEX T_R ON T(R)");
+                stmt.execute("CREATE INDEX T_FK ON T(FK)");
+                // no row holds ordinal 0: without the fix every value silently shifts one label down
+                stmt.execute("INSERT INTO T VALUES (1, 'B', NULL), (2, 'C', NULL), (3, NULL, NULL)");
+            }
+            Path script = new DatabaseExporter(oldH2).export(dbFile, tempDir.resolve("legacy.sql"), "sa", "");
+            ScriptRewriter.rewriteAndScanInPlace(script);
+
+            try (IsolatedH2Driver newH2 = IsolatedH2Driver.load("2.4.240")) {
+                Path migrated = new DatabaseImporter(newH2).importToTemp(dbFile, script, "sa", "");
+                try (Connection conn = newH2.connect(DatabaseImporter.buildTargetUrl(migrated), "sa", "");
+                     Statement stmt = conn.createStatement();
+                     ResultSet rs = stmt.executeQuery("SELECT ID, R FROM T ORDER BY ID")) {
+                    StringBuilder rows = new StringBuilder();
+                    while (rs.next()) rows.append(rs.getInt(1)).append('=').append(rs.getString(2)).append(' ');
+                    assertEquals("1=B 2=C 3=null ", rows.toString());
+                }
+            }
+        }
+    }
+
+    @Test
+    void arraysDefaultsAndMixedIndexesRoundTrip() throws Exception {
+        // shapes from review: ARRAY commas must not shift ENUM fields, integer ENUM defaults are 0-based
+        Path dbFile = tempDir.resolve("shapes.mv.db");
+        try (IsolatedH2Driver oldH2 = IsolatedH2Driver.load("1.4.200")) {
+            try (Connection conn = oldH2.connect("jdbc:h2:" + tempDir.resolve("shapes"), "sa", "");
+                 Statement stmt = conn.createStatement()) {
+                stmt.execute("CREATE TABLE T(ID INT, A ARRAY DEFAULT ARRAY[1, 2], N VARCHAR,"
+                        + " R ENUM('A', 'B', 'C') DEFAULT 1, FK NULL)");
+                stmt.execute("CREATE INDEX T_MIX ON T(ID DESC, FK)");
+                stmt.execute("CREATE UNIQUE INDEX T_U ON T(N, FK)");
+                stmt.execute("INSERT INTO T(ID, A, N, R) VALUES (1, ARRAY[1, 2, 3], 'x', 'B'), (2, ARRAY[4], 'y', 'C')");
+                stmt.execute("INSERT INTO T(ID, N) VALUES (3, 'x')");
+            }
+            Path script = new DatabaseExporter(oldH2).export(dbFile, tempDir.resolve("shapes.sql"), "sa", "");
+            RewriteReport report = ScriptRewriter.rewriteAndScanInPlace(script);
+            assertEquals(java.util.List.of("PUBLIC.T.FK", "PUBLIC.T.FK"), report.strippedIndexes());
+
+            try (IsolatedH2Driver newH2 = IsolatedH2Driver.load("2.4.240")) {
+                Path migrated = new DatabaseImporter(newH2).importToTemp(dbFile, script, "sa", "");
+                try (Connection conn = newH2.connect(DatabaseImporter.buildTargetUrl(migrated), "sa", "");
+                     Statement stmt = conn.createStatement()) {
+                    stmt.execute("INSERT INTO T(ID, N) VALUES (4, 'x')");
+                    assertEquals("1=B 2=C 3=B 4=B ", rows(stmt, "SELECT ID, R FROM T ORDER BY ID"));
+                    // non-unique index keeps ID; the always-NULL UNIQUE index enforced nothing and is gone
+                    assertEquals("T_MIX=ID ", rows(stmt, "SELECT INDEX_NAME, COLUMN_NAME FROM INFORMATION_SCHEMA.INDEX_COLUMNS"
+                            + " WHERE TABLE_NAME = 'T' ORDER BY INDEX_NAME"));
+                }
+            }
+        }
+    }
+
+    @Test
+    void rowWidthMismatchFailsInsteadOfShifting() throws IOException {
+        Path script = tempDir.resolve("width.sql");
+        Files.writeString(script, "CREATE TABLE T(ID INT, R ENUM('A', 'B'));\nINSERT INTO T VALUES (1, 0, 9);\n",
+                StandardCharsets.UTF_8);
+
+        assertThrows(IOException.class, () -> ScriptRewriter.rewriteAndScanInPlace(script));
+    }
+
+    private static String rows(Statement stmt, String sql) throws SQLException {
+        StringBuilder out = new StringBuilder();
+        try (ResultSet rs = stmt.executeQuery(sql)) {
+            int n = rs.getMetaData().getColumnCount();
+            while (rs.next()) {
+                out.append(rs.getString(1)).append('=');
+                for (int i = 2; i <= n; i++) out.append(i > 2 ? ":" : "").append(rs.getString(i));
+                out.append(' ');
+            }
+        }
+        return out.toString();
     }
 
     // --- Integration: rewritten script is accepted by H2 2.4.240 ---

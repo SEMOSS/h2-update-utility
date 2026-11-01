@@ -76,6 +76,16 @@ public final class ScriptRewriter {
                     "\\s+FOR\\s+[\"']?(?<class>[^\"';]+)[\"']?\\s*;?\\s*$",
             Pattern.CASE_INSENSITIVE);
 
+    /** Single-line {@code CREATE [UNIQUE] [HASH] INDEX} as written by H2 1.x {@code SCRIPT TO}. */
+    static final Pattern CREATE_INDEX = Pattern.compile(
+            "^\\s*CREATE\\s+(?<unique>UNIQUE\\s+)?(?:HASH\\s+)?(?:SPATIAL\\s+)?INDEX\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?" +
+                    "(?<index>(?:\"[^\"]*\"|[A-Za-z0-9_$]+)(?:\\.(?:\"[^\"]*\"|[A-Za-z0-9_$]+))*)\\s+ON\\s+" +
+                    "(?<table>(?:\"[^\"]*\"|[A-Za-z0-9_$]+)(?:\\.(?:\"[^\"]*\"|[A-Za-z0-9_$]+))*)" +
+                    "\\s*\\((?<cols>[^;]*)\\)\\s*;\\s*$",
+            Pattern.CASE_INSENSITIVE);
+
+    private static final Pattern INDEX_COLUMN = Pattern.compile("\"((?:[^\"]|\"\")*)\"|([A-Za-z0-9_$]+)");
+
     /** Patterns that should be noted as warnings (non-blocking observations). */
     private static final Map<Pattern, String> OBSERVATION_PATTERNS = buildObservationMap();
 
@@ -133,6 +143,7 @@ public final class ScriptRewriter {
             int totalReplacements,
             Map<String, Integer> replacementsByToken,
             List<String> strippedAggregates,
+            List<String> strippedIndexes,
             List<String> warnings,
             long scriptSizeBytes,
             long lineCount
@@ -140,6 +151,7 @@ public final class ScriptRewriter {
         public RewriteReport {
             replacementsByToken = Collections.unmodifiableMap(new TreeMap<>(replacementsByToken));
             strippedAggregates = List.copyOf(strippedAggregates);
+            strippedIndexes = List.copyOf(strippedIndexes);
             warnings = List.copyOf(warnings);
         }
     }
@@ -173,9 +185,11 @@ public final class ScriptRewriter {
         Map<String, Integer> perToken = new LinkedHashMap<>();
         for (String tok : ALIAS_ORDER) perToken.put(tok, 0);
         List<String> stripped = new ArrayList<>();
+        List<String> strippedIndexes = new ArrayList<>();
         Set<String> uniqueWarnings = new java.util.LinkedHashSet<>();
         long lineCount = 0;
         LegacyTextTypeRewriter textTypes = new LegacyTextTypeRewriter();
+        LegacySchemaRewriter schema = new LegacySchemaRewriter();
 
         try (BufferedReader reader = Files.newBufferedReader(script, StandardCharsets.UTF_8);
              BufferedWriter writer = Files.newBufferedWriter(tmp, StandardCharsets.UTF_8)) {
@@ -198,8 +212,27 @@ public final class ScriptRewriter {
                     continue;
                 }
 
-                // Category A + B ROW — token rewrites outside quoted regions
-                RewriteResult rr = rewriteLine(line, textTypes);
+                // 2.x cannot index a NULL-typed column; it only ever holds NULL
+                IndexFix indexFix = fixNullTypedIndex(line, schema);
+                if (indexFix != null) {
+                    strippedIndexes.addAll(indexFix.dropped());
+                    uniqueWarnings.add((indexFix.line() == null ? "Stripped CREATE INDEX" : "Dropped from CREATE INDEX")
+                            + " NULL-typed column(s) " + indexFix.dropped()
+                            + "; H2 2.x cannot index them and they only hold NULL");
+                    writer.write("-- [migration] stripped: " + line);
+                    writer.newLine();
+                    if (indexFix.line() != null) {
+                        writer.write(indexFix.line());
+                        writer.newLine();
+                    }
+                    continue;
+                }
+
+                // ENUM ordinals -> labels, then Category A + B ROW token rewrites outside quoted regions
+                RewriteResult enums = schema.rewrite(line);
+                totalReplacements += enums.replacements();
+                enums.perToken().forEach((k, v) -> perToken.merge(k, v, Integer::sum));
+                RewriteResult rr = rewriteLine(enums.text(), textTypes);
                 totalReplacements += rr.replacements;
                 for (var e : rr.perToken.entrySet()) {
                     perToken.merge(e.getKey(), e.getValue(), Integer::sum);
@@ -219,14 +252,18 @@ public final class ScriptRewriter {
 
         Files.move(tmp, script, StandardCopyOption.REPLACE_EXISTING);
 
-        boolean changed = totalReplacements > 0 || !stripped.isEmpty();
+        if (schema.enumOrdinalReplacements() > 0) {
+            uniqueWarnings.add("Converted " + schema.enumOrdinalReplacements()
+                    + " ENUM ordinal(s) to labels; H2 1.4 SCRIPT writes 0-based ordinals that 2.x reads as 1-based");
+        }
+        boolean changed = totalReplacements > 0 || !stripped.isEmpty() || !strippedIndexes.isEmpty();
         if (!changed) {
             Files.deleteIfExists(backup);
             LOGGER.debug("ScriptRewriter: no rewrites applied to " + script.getFileName());
         } else {
             LOGGER.info("ScriptRewriter applied " + totalReplacements
                     + " type-alias replacement(s) and stripped " + stripped.size()
-                    + " aggregate(s) in " + script.getFileName());
+                    + " aggregate(s) and " + strippedIndexes.size() + " index(es) in " + script.getFileName());
         }
 
         // Drop zero-count tokens from the report to keep JSON concise
@@ -237,9 +274,49 @@ public final class ScriptRewriter {
                 totalReplacements,
                 perToken,
                 stripped,
+                strippedIndexes,
                 new ArrayList<>(uniqueWarnings),
                 size,
                 lineCount);
+    }
+
+    /** Index rewritten without its NULL-typed columns; line is null when the whole index goes. */
+    private record IndexFix(String line, List<String> dropped) {
+    }
+
+    // a UNIQUE index over an always-NULL column never rejects a row (NULLs are distinct),
+    // so it is stripped whole; narrowing it would add a constraint the source never had
+    private static IndexFix fixNullTypedIndex(String line, LegacySchemaRewriter schema) {
+        Matcher index = CREATE_INDEX.matcher(line);
+        if (!index.matches()) return null;
+        String table = index.group("table");
+        List<String> keep = new ArrayList<>();
+        List<String> dropped = new ArrayList<>();
+        for (String part : splitColumns(index.group("cols"))) {
+            Matcher col = INDEX_COLUMN.matcher(part);
+            String name = !col.find() ? "" : col.group(1) != null ? "\"" + col.group(1) + "\"" : col.group(2);
+            if (schema.isNullTyped(table, name)) dropped.add(LegacySchemaRewriter.key(table) + "." + name.replace("\"", ""));
+            else keep.add(part.trim());
+        }
+        if (dropped.isEmpty()) return null;
+        if (keep.isEmpty() || index.group("unique") != null) return new IndexFix(null, dropped);
+        String rewritten = line.substring(0, index.start("cols")) + String.join(", ", keep)
+                + line.substring(index.end("cols"));
+        return new IndexFix(rewritten, dropped);
+    }
+
+    // index column lists hold only (quoted) names and ASC/DESC/NULLS options
+    private static List<String> splitColumns(String cols) {
+        List<String> parts = new ArrayList<>();
+        int start = 0;
+        boolean quoted = false;
+        for (int i = 0; i < cols.length(); i++) {
+            char c = cols.charAt(i);
+            if (c == '"') quoted = !quoted;
+            else if (c == ',' && !quoted) { parts.add(cols.substring(start, i)); start = i + 1; }
+        }
+        parts.add(cols.substring(start));
+        return parts;
     }
 
     /**
