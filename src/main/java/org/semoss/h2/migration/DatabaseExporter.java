@@ -18,6 +18,9 @@ public final class DatabaseExporter {
 
     private static final Logger LOGGER = LogManager.getLogger(DatabaseExporter.class);
 
+    /** H2 "The database is read only". */
+    static final int READ_ONLY = 90097;
+
     private final IsolatedH2Driver driver;
 
     public DatabaseExporter(IsolatedH2Driver driver) {
@@ -56,16 +59,43 @@ public final class DatabaseExporter {
 
         LOGGER.info("Exporting " + dbFile + " using H2 " + driver.getVersion());
 
-        try (Connection conn = driver.connect(url, username, password);
-             Statement stmt = conn.createStatement()) {
-            // SCRIPT TO exports all DDL and DML to a SQL file
-            stmt.execute("SCRIPT TO '" + normalizedScript.toString().replace("'", "''") + "'");
+        try {
+            script(url, normalizedScript, username, password);
+        } catch (SQLException e) {
+            if (e.getErrorCode() != READ_ONLY) throw e;
+            // a never-initialized file has no user yet, and 1.4 can only create one with write access
+            LOGGER.warn("Read-only open of " + dbFile.getFileName()
+                    + " needs a write; exporting from a scratch copy instead");
+            exportFromCopy(dbFile, normalizedScript, username, password);
         }
 
         long size = Files.size(normalizedScript);
         LOGGER.info("Exported " + dbFile.getFileName() + " -> " + normalizedScript.getFileName()
                 + " (" + size + " bytes)");
         return normalizedScript;
+    }
+
+    private void script(String url, Path scriptFile, String username, String password) throws SQLException {
+        try (Connection conn = driver.connect(url, username, password);
+             Statement stmt = conn.createStatement()) {
+            // SCRIPT TO exports all DDL and DML to a SQL file
+            stmt.execute("SCRIPT TO '" + scriptFile.toString().replace("'", "''") + "'");
+        }
+    }
+
+    // the copy sits beside the script (work/backup dir), never beside the original
+    private void exportFromCopy(Path dbFile, Path scriptFile, String username, String password)
+            throws SQLException, IOException {
+        Path dir = Files.createTempDirectory(scriptFile.getParent(), "h2-export-copy");
+        try {
+            Path copy = dir.resolve(dbFile.getFileName());
+            Files.copy(dbFile, copy);
+            script("jdbc:h2:" + stripExtension(copy), scriptFile, username, password);
+        } finally {
+            try (var files = Files.walk(dir)) {
+                for (Path p : files.sorted(java.util.Comparator.reverseOrder()).toList()) Files.deleteIfExists(p);
+            }
+        }
     }
 
     /**

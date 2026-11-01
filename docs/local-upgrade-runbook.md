@@ -26,6 +26,10 @@ Legacy `TEXT`, `LONGTEXT`, `MEDIUMTEXT`, `TINYTEXT`, and `NTEXT` column types
 are rewritten to `CLOB` before import to preserve H2 1.4 LOB semantics. H2 2.x
 accepting `TEXT` as `VARCHAR` is not sufficient schema preservation. Check JDBC
 column types as well as row values when validating a migrated fixture.
+ENUM values are written by H2 1.4 as 0-based ordinals and are rewritten to their
+labels before import (2.x reads ordinals as 1-based). Indexes on `NULL`-typed
+columns are stripped, and a never-initialized file is exported from a scratch
+copy. See support guide Category M.
 Files already converted to 2.x are skipped; this change does not repair their
 column types. Test the fix on fresh copies of the pre-migration files.
 

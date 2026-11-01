@@ -34,13 +34,14 @@ for scope in $SCOPES; do
   else
     rc=1
     echo "=== scope $scope FAILED; see REPORT $scope below"
-    if [ "$DRY_RUN" != "true" ]; then
-      echo "=== real run stopped; scopes after $scope were not run"
-      break
-    fi
   fi
   print_report "$scope" "$out/migration-report.json"
   rm -rf "$tmp"
+  # report first: /work is gone once the pod exits
+  if [ "$rc" -ne 0 ] && [ "$DRY_RUN" != "true" ]; then
+    echo "=== real run stopped; scopes after $scope were not run"
+    break
+  fi
 done
 
 echo "=== run $RUN_ID finished with exit $rc; reports printed above and under $WORK_DIR/$RUN_ID"

@@ -33,6 +33,10 @@ selected merely because its name sorts first.
 - **Text LOB preservation**: Legacy `TEXT`, `LONGTEXT`, `MEDIUMTEXT`, `TINYTEXT`,
   and `NTEXT` column declarations become explicit `CLOB`, preserving their H2
   1.4 storage type. Ordinary `VARCHAR` columns remain unchanged
+- **ENUM and NULL-type repair**: H2 1.4 `SCRIPT` writes ENUM values as 0-based
+  ordinals that 2.x reads as 1-based; each ordinal becomes its label so values
+  never shift. Indexes on `NULL`-typed columns (always NULL; 2.x cannot index
+  them) are stripped. A never-initialized file is exported from a scratch copy
 - **SEMOSS target classification**: Distinguishes system stores, user engines,
   generated audit/insight databases, persisted insight-frame stores, and live
   `InsightCache` files before credentials are selected
@@ -302,7 +306,7 @@ written to the report.
 
 Actual cloud runs create a verified remote backup before replacing any source
 object. S3, MinIO, and GCS retain backups under
-`_semoss-h2-migration/<runId>/backup`; Azure retains them in the
+`_semoss-h2-migration/<runId>/backup/<semoss-db|semoss-project>/<id>`; Azure retains them in the
 `semoss-h2-migration` container. Candidate objects are removed after successful
 scope verification, while backups remain until an operator deliberately removes
 them. If publication fails after promotion begins, every changed object in that
@@ -366,7 +370,7 @@ through `/app/migrate-all.sh`:
   scope under `/work/<runId>/<scope>/`. Staging and local backups are deleted
   per engine/project once it finishes; a failed one keeps its local backups. Each report is also printed to the Job
   log between `=== BEGIN REPORT <scope>` and `=== END REPORT <scope>`. Durable
-  backups live in the bucket under `_semoss-h2-migration/<runId>/backup`
+  backups live in the bucket under `_semoss-h2-migration/<runId>/backup/<semoss-db|semoss-project>/<id>`
   (Azure: `semoss-h2-migration`).
 - A dry run checks every scope; a real run stops at the first failed scope.
   Exit code `1` (Job `Failed`) means at least one target failed.

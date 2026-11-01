@@ -18,6 +18,9 @@ selected merely because its name sorts first.
 | `Syntax error in SQL statement "… CREATE TABLE FOO(VALUE VARCHAR …"` | Column or table named `VALUE`, `KEY`, `TOP`, etc. | ✅ Resolved — upgrade utility to latest version |
 | `File corrupted` or `Wrong password` when opening DB | Database is encrypted with AES cipher | See **[Encrypted Databases](#encrypted-databases)** |
 | `SELECT 1` succeeds but later Semoss queries fail with unknown functions | Legacy SQL functions like `GROUP_CONCAT()` no longer available | See **[Runtime Query Compatibility](#runtime-query-compatibility)** |
+| `Value not permitted for column "('A', 'B')": "0"` | ENUM column; H2 1.4 dumps 0-based ordinals | Resolved; see **[Category M](#category-m-enum-ordinals-null-typed-columns-and-empty-files)** |
+| `Feature not supported: "Index on column: ""X"" NULL"` | Column declared with type `NULL`, with an index (constraints on it still fail) | Resolved for indexes; see **[Category M](#category-m-enum-ordinals-null-typed-columns-and-empty-files)** |
+| `The database is read only [90097-200]` during export | Never-initialized file (no schema, no user) | Resolved; see **[Category M](#category-m-enum-ordinals-null-typed-columns-and-empty-files)** |
 | Migration completes but database feels slower | Large exported SQL script exhausted memory during import | See **[Memory and Performance](#memory-and-performance)** |
 
 ---
@@ -351,7 +354,7 @@ Semoss itself uses some H2 1.x-only SQL syntax in its query builders. These quer
 This is a Semoss-side issue, not a migration utility issue. Semoss has internal SQL builders that generate queries with 1.x syntax. Those need to be updated for H2 2.x.
 
 ### How the Utility Partially Handles It
-The migration utility applies `MODE=LEGACY` to the database, which restores many 1.x functions as compatibility aliases:
+The migration utility imports with `MODE=LEGACY` and `NON_KEYWORDS=...`. Both are connection settings: they are **not** stored in the migrated file, so SEMOSS's own connections run without them. H2 2.4 accepts `GROUP_CONCAT` natively, but unquoted 2.x keywords (`KEY`, `VALUE`, `YEAR`, ...) used as names fail unless SEMOSS quotes them (`H2_DB_KEYWORDS` in `RDF_Map.prop`). During import, `MODE=LEGACY` covers:
 - `GROUP_CONCAT` → mapped to `LISTAGG`
 - `CASEWHEN` → mapped to `CASE WHEN`
 - `MERGE INTO ... KEY(...)` → supported
@@ -412,6 +415,47 @@ All tests run against real H2 databases, not mocks, ensuring real-world compatib
 
 ### How the Utility Handles It
 Every category above (A–K) has been tested with actual database export/import cycles. If you encounter a failure that doesn't match any of the above categories, please [open an issue on GitHub](https://github.com/SEMOSS/h2-migration-service/issues) — this helps expand coverage.
+
+---
+
+## Category M: ENUM Ordinals, NULL-Typed Columns and Empty Files
+
+### ENUM columns
+H2 1.4.200 `SCRIPT` writes ENUM values as **0-based ordinals** (`0` is the first
+label). H2 2.x reads an integer inserted into an ENUM as a **1-based** ordinal.
+Imported unchanged, a `0` fails with `Value not permitted for column ...: "0"`,
+and a table with no `0` imports **silently shifted** one label down (`'B'`
+becomes `'A'`). Older utility builds only avoided the shift on tables where some
+row held `0`; check any ENUM database migrated with them against its backup.
+
+The rewriter tracks each `CREATE TABLE` ENUM column and replaces every ordinal in
+its `INSERT ... VALUES` rows, and an integer `DEFAULT` / `ON UPDATE` (also 0-based
+in 1.4), with the quoted label. `ARRAY [...]` and `(...)` values nest, so their
+commas never shift the column count, and a row whose value count differs from
+the table fails. Anything it cannot map (an ENUM outside a table column, such as
+a `DOMAIN`, an out-of-range ordinal, or an expression as an ENUM value) fails the
+row instead of guessing. The report shows `typeAliasReplacements.ENUM_ORDINAL`
+and a warning with the count.
+
+### NULL-typed columns
+H2 1.4 allows a column declared with type `NULL` (typically from
+`CREATE TABLE ... AS SELECT NULL AS X`). Both versions store only `NULL` in it,
+but 2.x refuses to index it (`Feature not supported: "Index on column: ..."`).
+The rewriter keeps the column. A plain index loses only its NULL-typed columns
+(stripped whole if none are left); a `UNIQUE` index over one is stripped whole,
+because NULLs are distinct and it never rejected a row, while narrowing it would
+add a constraint. The original line stays as `-- [migration] stripped: ...` and
+the columns are listed in `transformations.strippedNullTypeIndexes`. A `UNIQUE`,
+primary-key or foreign-key **constraint** on such a column still fails the row
+(same error); report it to the operator.
+
+### Never-initialized files
+A file SEMOSS created but never opened as a database (for example an unused
+`audit_log_database.mv.db`) has no schema and no user. The read-only export
+fails with `The database is read only [90097-200]` because H2 1.4 must write to
+create the first user. The exporter then retries on a scratch copy next to the
+export script; the original file is never opened for writing and the copy is
+deleted afterwards. The result is an empty 2.x database with the profile's user.
 
 ---
 

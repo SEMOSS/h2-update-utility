@@ -508,6 +508,9 @@ public class H2MigrationService {
         if (!rr.strippedAggregates().isEmpty()) {
             result.transformation("strippedAggregates", rr.strippedAggregates());
         }
+        if (!rr.strippedIndexes().isEmpty()) {
+            result.transformation("strippedNullTypeIndexes", rr.strippedIndexes());
+        }
         result.transformation("scriptSizeBytes", rr.scriptSizeBytes());
         result.transformation("scriptLineCount", rr.lineCount());
         for (String w : rr.warnings()) result.addWarning(w);

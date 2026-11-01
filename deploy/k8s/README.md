@@ -19,7 +19,7 @@ One Job runs every scope in order (`semoss-db`, then `semoss-project`) through
 - Credentials: give `serviceAccountName` bucket read/write via workload identity
   (IRSA, Azure workload identity/MSI, GKE Workload Identity), or create
   `h2-migration-storage` from `secret.example.yaml`. The pod needs write access:
-  backups go to `_semoss-h2-migration/<runId>/backup` in the same bucket
+  backups go to `_semoss-h2-migration/<runId>/backup/<semoss-db|semoss-project>/<id>` in the same bucket
   (Azure: `semoss-h2-migration` container).
 - Azure: set `SCOPES` to every `db-<engineId>` and `project-<projectId>`
   container; the utility handles one container per invocation.
@@ -70,7 +70,7 @@ Then roll out SEMOSS 6.0.0 and scale it back up.
 
 ## Rollback
 
-Every replaced object is backed up to `_semoss-h2-migration/<runId>/backup`
+Every replaced object is backed up to `_semoss-h2-migration/<runId>/backup/<semoss-db|semoss-project>/<id>`
 before promotion, and a failed promotion restores its scope automatically. To
 undo a finished run, stop SEMOSS, copy the backup objects back over the
 originals with your provider's tooling, and start the previous SEMOSS version.

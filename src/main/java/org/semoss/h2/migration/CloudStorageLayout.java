@@ -178,17 +178,21 @@ public final class CloudStorageLayout {
     }
 
     public String backupSmssPath(String runId, ScopeDescriptor scope, String fileName) {
-        String container = lastSegment(scope.smssRoot());
-        return workPath(runId, "backup", container, fileName);
+        return workPath(runId, "backup", scopeFolder(scope.smssRoot()), fileName);
     }
 
     public String candidateSmssPath(String runId, ScopeDescriptor scope, String fileName) {
-        String container = lastSegment(scope.smssRoot());
-        return workPath(runId, "candidate", container, fileName);
+        return workPath(runId, "candidate", scopeFolder(scope.smssRoot()), fileName);
     }
 
     private String workPath(String runId, String stage, ScopeDescriptor scope, String relativePath) {
-        return workPath(runId, stage, lastSegment(scope.sourceRoot()), relativePath);
+        return workPath(runId, stage, scopeFolder(scope.sourceRoot()), relativePath);
+    }
+
+    // keep the semoss-db/semoss-project level so an engine and a project with the same id never share a folder
+    private String scopeFolder(String root) {
+        if (provider == Provider.AZURE) return lastSegment(root);
+        return join(semossRootName, lastSegment(root));
     }
 
     private String workPath(String runId, String stage, String scopeFolder, String relativePath) {
