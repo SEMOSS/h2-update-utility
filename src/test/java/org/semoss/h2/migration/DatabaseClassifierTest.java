@@ -1,5 +1,6 @@
 package org.semoss.h2.migration;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 
 import org.junit.jupiter.api.Test;
@@ -13,6 +14,27 @@ class DatabaseClassifierTest {
 
     @TempDir
     Path tempDir;
+
+    @Test
+    void macosMetadataIsSkippedByNameFolderOrContent() throws Exception {
+        Path project = tempDir.resolve("project");
+        assertTarget(project, project.resolve("App__id/app_root/version/App__id/._insights_database.mv.db"),
+                TargetType.MACOS_METADATA, Disposition.SKIP);
+        assertTarget(project, project.resolve("App__id/__MACOSX/insights_database.mv.db"),
+                TargetType.MACOS_METADATA, Disposition.SKIP);
+
+        // AppleDouble bytes under an ordinary name
+        Path disguised = project.resolve("App__id/insights_database.mv.db");
+        Files.createDirectories(disguised.getParent());
+        Files.write(disguised, new byte[] {0x00, 0x05, 0x16, 0x07, 0x00, 0x02});
+        assertTarget(project, disguised, TargetType.MACOS_METADATA, Disposition.SKIP);
+        assertEquals("macOS metadata file (AppleDouble), not an H2 database; left in place",
+                DatabaseClassifier.classify(project, disguised).resolutionError());
+
+        // a real-looking file is unaffected
+        Files.write(disguised, "H:2,block:2".getBytes());
+        assertTarget(project, disguised, TargetType.PROJECT_INSIGHTS_H2, Disposition.MIGRATE);
+    }
 
     @Test
     void classifiesEveryLocalSemossTargetClass() {

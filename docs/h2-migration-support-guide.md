@@ -20,6 +20,7 @@ selected merely because its name sorts first.
 | `SELECT 1` succeeds but later Semoss queries fail with unknown functions | Legacy SQL functions like `GROUP_CONCAT()` no longer available | See **[Runtime Query Compatibility](#runtime-query-compatibility)** |
 | `Value not permitted for column "('A', 'B')": "0"` | ENUM column; H2 1.4 dumps 0-based ordinals | Resolved; see **[Category M](#category-m-enum-ordinals-null-typed-columns-and-empty-files)** |
 | `Feature not supported: "Index on column: ""X"" NULL"` | Column declared with type `NULL`, with an index (constraints on it still fail) | Resolved for indexes; see **[Category M](#category-m-enum-ordinals-null-typed-columns-and-empty-files)** |
+| `Unrecognized H2 database location` on a `._*.mv.db` file | macOS AppleDouble metadata copied in with the files | Resolved; row is `SKIPPED` as `MACOS_METADATA` |
 | `The database is read only [90097-200]` during export | Never-initialized file (no schema, no user) | Resolved; see **[Category M](#category-m-enum-ordinals-null-typed-columns-and-empty-files)** |
 | Migration completes but database feels slower | Large exported SQL script exhausted memory during import | See **[Memory and Performance](#memory-and-performance)** |
 
@@ -448,6 +449,14 @@ add a constraint. The original line stays as `-- [migration] stripped: ...` and
 the columns are listed in `transformations.strippedNullTypeIndexes`. A `UNIQUE`,
 primary-key or foreign-key **constraint** on such a column still fails the row
 (same error); report it to the operator.
+
+### macOS metadata files
+Copying a SEMOSS folder from a Mac (zip, Finder, some sync tools) can add
+AppleDouble sidecars such as `._insights_database.mv.db` or a `__MACOSX/`
+folder. They are not H2 files and SEMOSS never opens them. The classifier
+recognises them by name or by their `00 05 16 07` header and reports them as
+`SKIPPED` (`MACOS_METADATA`), leaving them in place. Older builds failed them
+with `Unrecognized H2 database location`, which held back the whole scope.
 
 ### Never-initialized files
 A file SEMOSS created but never opened as a database (for example an unused

@@ -151,6 +151,29 @@ class CloudMigrationIT {
     }
 
     @Test
+    void macosMetadataFileIsSkippedAndDoesNotBlockItsProject() throws Exception {
+        // shape seen in teamwork-govconnect-1: an AppleDouble ._ sidecar beside real project DBs
+        Path project = tempDir.resolve("remote/semoss-project/project-id");
+        Path insights = project.resolve("insights_database.mv.db");
+        Path sidecar = project.resolve("app_root/version/App__project-id/._insights_database.mv.db");
+        createSimpleH2(insights, "INSIGHT_DATA");
+        Files.createDirectories(sidecar.getParent());
+        Files.write(sidecar, new byte[] {0x00, 0x05, 0x16, 0x07, 0x00, 0x02, 0x00, 0x00});
+        String sidecarHash = CloudDatabaseDiscovery.sha256(sidecar);
+
+        H2MigrationService service = new H2MigrationService(
+                config(false, true, "semoss-project/project-id"));
+        int exitCode = service.run();
+
+        assertEquals(0, exitCode);
+        assertEquals(1, service.getReport().successCount());
+        assertEquals(1, service.getReport().skippedCount());
+        assertFalse(H2VersionDetector.detect(insights).needsMigration());
+        assertEquals(sidecarHash, CloudDatabaseDiscovery.sha256(sidecar));
+        assertTrue(service.getReport().toJson().contains("MACOS_METADATA"));
+    }
+
+    @Test
     void unknownProjectDatabaseFailsScopeWithoutRemoteWrites() throws Exception {
         Path unknown = tempDir.resolve("remote/semoss-project/project-id/other.mv.db");
         createSimpleH2(unknown, "UNKNOWN_DATA");
