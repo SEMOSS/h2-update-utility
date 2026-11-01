@@ -36,7 +36,7 @@ spec:
             # "true": also migrate non-INSIGHTS projects without saved insights; see README
             - name: MIGRATE_ALL_PROJECT_TYPES
               value: "false"
-            # S3/MinIO/GCS: both prefixes. Azure: list every db-<engineId> and project-<projectId>
+            # every engine, then every project (Azure: all db-* / project-* containers)
             - name: SCOPES
               value: "semoss-db semoss-project"
             - name: WORK_DIR

@@ -57,12 +57,12 @@ public final class CloudDatabaseDiscovery {
         List<String> mosfets = new ArrayList<>();
         if (objectStore instanceof RCloneClient) {
             // one listing for both: the walk, not the filter, is what costs time
-            for (String file : objectStore.listFiles(root, "*.{mv.db,mosfet}")) {
+            for (String file : objectStore.listFiles(root, layout.listInclude("*.{mv.db,mosfet}"))) {
                 (file.endsWith(".mosfet") ? mosfets : databases).add(file);
             }
         } else {
-            databases.addAll(objectStore.listFiles(root, "*.mv.db"));
-            mosfets.addAll(objectStore.listFiles(root, "*.mosfet"));
+            databases.addAll(objectStore.listFiles(root, layout.listInclude("*.mv.db")));
+            mosfets.addAll(objectStore.listFiles(root, layout.listInclude("*.mosfet")));
         }
         List<CloudStorageLayout.ScopeDescriptor> scopes = layout.groupDatabases(databases, stagingDir);
         LOGGER.info("Found " + databases.size() + " database object(s) in " + scopes.size()
@@ -74,7 +74,7 @@ public final class CloudDatabaseDiscovery {
             throws IOException, InterruptedException {
         String root = layout.discoveryRoot();
         LOGGER.info("Discovering H2 databases in configured cloud search path");
-        List<String> files = objectStore.listFiles(root, "*.mv.db");
+        List<String> files = objectStore.listFiles(root, layout.listInclude("*.mv.db"));
         List<CloudStorageLayout.ScopeDescriptor> scopes = layout.groupDatabases(files, stagingDir);
         LOGGER.info("Found " + files.size() + " database object(s) in " + scopes.size()
                 + " SEMOSS scope(s)");

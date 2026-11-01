@@ -82,7 +82,31 @@ class CloudStorageLayoutTest {
         assertThrows(IllegalArgumentException.class,
                 () -> CloudStorageLayout.fromConfig(config("s3", "other")));
         assertThrows(IllegalArgumentException.class,
-                () -> CloudStorageLayout.fromConfig(config("azure", "semoss-db")));
+                () -> CloudStorageLayout.fromConfig(config("azure", "other")));
+    }
+
+    @Test
+    void azureSemossRootCoversEveryContainerOfItsType() {
+        CloudStorageLayout engines = CloudStorageLayout.fromConfig(config("azure", "semoss-db"));
+        var scopes = engines.groupDatabases(List.of(
+                "db-a/database.mv.db",
+                "db-a/audit_log_database.mv.db",
+                "db-a-smss/x.mv.db",
+                "project-p/insights_database.mv.db",
+                "semoss-h2-migration/run/backup/db-a/database.mv.db",
+                "db-b/database.mv.db"), tempDir);
+
+        assertEquals("", engines.discoveryRoot());
+        assertEquals("/db-*/**.mv.db", engines.listInclude("*.mv.db"));
+        assertEquals(List.of("a", "b"), scopes.stream().map(scope -> scope.key().id()).toList());
+        assertEquals("db-a", scopes.get(0).sourceRoot());
+        assertEquals("db-a-smss", scopes.get(0).smssRoot());
+        assertEquals("db-a/database.mv.db", scopes.get(0).databases().get(0).remotePath());
+
+        CloudStorageLayout projects = CloudStorageLayout.fromConfig(config("azure", "semoss-project"));
+        assertEquals("p", projects.scopeIdOf("project-p/app_root/version/i/i.mosfet"));
+        assertEquals(null, projects.scopeIdOf("project-p-smss/App__p.smss"));
+        assertEquals(null, projects.scopeIdOf("db-a/database.mv.db"));
     }
 
     private MigrationConfig config(String provider, String searchPath) {
