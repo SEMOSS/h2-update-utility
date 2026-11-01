@@ -21,8 +21,8 @@ One Job runs every scope in order (`semoss-db`, then `semoss-project`) through
   `h2-migration-storage` from `secret.example.yaml`. The pod needs write access:
   backups go to `_semoss-h2-migration/<runId>/backup/<semoss-db|semoss-project>/<id>` in the same bucket
   (Azure: `semoss-h2-migration` container).
-- Azure: set `SCOPES` to every `db-<engineId>` and `project-<projectId>`
-  container; the utility handles one container per invocation.
+- Azure: the default `SCOPES` covers every `db-*` and `project-*` container
+  in the account, with the same project-type filter.
 - Project scopes migrate by default only projects whose `.smss` has
   `PROJECT_ENUM_TYPE=INSIGHTS`, a blank or missing type, or no `.smss`, plus any
   project with saved insights (a `*.mosfet` file). Other projects (BLOCKS,

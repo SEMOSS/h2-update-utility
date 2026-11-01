@@ -163,7 +163,7 @@ final class CloudMigrationCoordinator {
             throws IOException, InterruptedException {
         Path dir = stagingRoot.resolve("project-smss");
         Files.createDirectories(dir);
-        if (layout.provider() == CloudStorageLayout.Provider.AZURE || projects.size() <= BULK_SMSS_THRESHOLD) {
+        if (projects.size() <= BULK_SMSS_THRESHOLD) {
             for (CloudStorageLayout.ScopeDescriptor scope : projects) {
                 List<String> names;
                 try {
@@ -179,8 +179,10 @@ final class CloudMigrationCoordinator {
                 }
             }
         } else {
+            // parent of the project scopes: semoss-project folder, or the Azure account (containers)
             String sourceRoot = projects.get(0).sourceRoot();
-            objectStore.downloadProjectSmss(sourceRoot.substring(0, sourceRoot.lastIndexOf('/')), dir);
+            int slash = sourceRoot.lastIndexOf('/');
+            objectStore.downloadProjectSmss(slash < 0 ? "" : sourceRoot.substring(0, slash), dir);
         }
         Map<String, String> types = new HashMap<>();
         try (var files = Files.walk(dir)) {
@@ -188,7 +190,12 @@ final class CloudMigrationCoordinator {
                 Map<String, String> values = SmssCredentialReader.loadValues(smss);
                 String id = values.getOrDefault("PROJECT", "");
                 String folder = smss.getParent().getFileName().toString();
-                if (id.isBlank() && folder.endsWith("-smss")) id = folder.substring(0, folder.length() - "-smss".length());
+                if (id.isBlank() && folder.endsWith("-smss")) {
+                    id = folder.substring(0, folder.length() - "-smss".length());
+                    if (layout.provider() == CloudStorageLayout.Provider.AZURE && id.startsWith("project-")) {
+                        id = id.substring("project-".length());
+                    }
+                }
                 if (!id.isBlank()) {
                     types.put(id, values.getOrDefault("PROJECT_ENUM_TYPE", "").trim().toUpperCase(Locale.ROOT));
                 }
@@ -198,12 +205,12 @@ final class CloudMigrationCoordinator {
         return types;
     }
 
-    /** Project ids that have saved insights; the .mosfet paths are relative to the project root. */
-    private static Set<String> projectsWithInsights(List<String> mosfetFiles) {
+    /** Project ids that have saved insights; the .mosfet paths are relative to the discovery root. */
+    private Set<String> projectsWithInsights(List<String> mosfetFiles) {
         Set<String> ids = new HashSet<>();
         for (String file : mosfetFiles) {
-            int slash = file.indexOf('/');
-            if (slash > 0) ids.add(file.substring(0, slash));
+            String id = layout.scopeIdOf(file);
+            if (id != null) ids.add(id);
         }
         return ids;
     }

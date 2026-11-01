@@ -254,6 +254,141 @@ class CloudMigrationIT {
         assertEquals(55, service.getReport().skippedCount());
     }
 
+    @Test
+    void azureProjectRunCoversEveryContainerAndAppliesTheTypeFilter() throws Exception {
+        Path account = tempDir.resolve("azure");
+        Map<String, Path> dbs = new java.util.LinkedHashMap<>();
+        for (String id : List.of("insights-id", "code-id", "code-saved-id")) {
+            Path db = account.resolve("project-" + id + "/insights_database.mv.db");
+            createSimpleH2(db, "T");
+            dbs.put(id, db);
+        }
+        azureProjectSmss(account, "insights-id", "INSIGHTS");
+        azureProjectSmss(account, "code-saved-id", "CODE");
+        Path mosfet = account.resolve("project-code-saved-id/app_root/version/i1/i1.mosfet");
+        Files.createDirectories(mosfet.getParent());
+        Files.writeString(mosfet, "{}");
+        // over the bulk threshold, so project types come from one account-wide SMSS copy
+        for (int i = 0; i < 55; i++) {
+            Path junk = account.resolve("project-blocks-" + i + "/insights_database.mv.db");
+            Files.createDirectories(junk.getParent());
+            Files.writeString(junk, "not a database");
+            azureProjectSmss(account, "blocks-" + i, "BLOCKS");
+        }
+        azureProjectSmss(account, "code-id", "CODE");
+        // engine containers are not part of a project run
+        Path engineDb = account.resolve("db-engine-id/database.mv.db");
+        createSimpleH2(engineDb, "E");
+        String engineHash = CloudDatabaseDiscovery.sha256(engineDb);
+
+        MigrationConfig config = MigrationConfig.fromArgs(new String[] {
+                "--mode=cloud", "--backup-dir=" + tempDir.resolve("local-backup"),
+                "--semoss-storage-provider=azure", "--az-conn-string=test",
+                "--search-path=semoss-project", "--confirm-semoss-stopped"});
+        H2MigrationService service = new H2MigrationService(config);
+        try (IsolatedH2Driver oldDriver = IsolatedH2Driver.load("1.4.200");
+             IsolatedH2Driver newDriver = IsolatedH2Driver.load("2.4.240")) {
+            new CloudMigrationCoordinator(config, service.getReport(), service, oldDriver, newDriver,
+                    CloudStorageLayout.fromConfig(config), new ContainerStore(account),
+                    tempDir.resolve("azure-staging")).execute();
+        }
+
+        assertEquals(0, service.getReport().failedCount(), service.getReport().toJson());
+        assertEquals(2, service.getReport().successCount());
+        assertEquals(56, service.getReport().skippedCount());
+        assertFalse(H2VersionDetector.detect(dbs.get("insights-id")).needsMigration());
+        assertFalse(H2VersionDetector.detect(dbs.get("code-saved-id")).needsMigration());
+        assertTrue(H2VersionDetector.detect(dbs.get("code-id")).needsMigration());
+        assertEquals(engineHash, CloudDatabaseDiscovery.sha256(engineDb));
+        assertTrue(Files.exists(account.resolve(
+                "semoss-h2-migration")), "backups go to the Azure work container");
+    }
+
+    private static void azureProjectSmss(Path account, String id, String type) throws Exception {
+        Path smss = account.resolve("project-" + id + "-smss/App__" + id + ".smss");
+        Files.createDirectories(smss.getParent());
+        Files.writeString(smss, "PROJECT\t" + id + "\nPROJECT_ALIAS\tApp\nPROJECT_ENUM_TYPE\t" + type + "\n");
+    }
+
+    /** Azure-shaped store: paths are container/blob, resolved under one local account dir. */
+    private static final class ContainerStore implements CloudObjectStore {
+        private final Path account;
+
+        ContainerStore(Path account) {
+            this.account = account;
+        }
+
+        @Override
+        public String authenticationMode() {
+            return "TEST_AZURE";
+        }
+
+        private Path resolve(String remotePath) {
+            return remotePath.isEmpty() ? account : account.resolve(remotePath);
+        }
+
+        @Override
+        public List<String> listFiles(String remotePath, String include) throws java.io.IOException {
+            Path root = resolve(remotePath);
+            if (!Files.exists(root)) throw new java.io.IOException("not found");
+            // honour the container anchor and the suffix set of rclone's --include
+            String anchor = include.startsWith("/") ? include.substring(1, include.indexOf('*')) : null;
+            List<String> suffixes = include.contains("mosfet") && include.contains("mv.db")
+                    ? List.of(".mv.db", ".mosfet")
+                    : include.contains("mosfet") ? List.of(".mosfet")
+                    : include.contains("smss") ? List.of(".smss") : List.of(".mv.db");
+            try (var stream = Files.walk(root)) {
+                return stream.filter(Files::isRegularFile)
+                        .map(path -> root.relativize(path).toString().replace('\\', '/'))
+                        .filter(path -> anchor == null || path.startsWith(anchor))
+                        .filter(path -> suffixes.stream().anyMatch(path::endsWith))
+                        .toList();
+            }
+        }
+
+        @Override
+        public CloudObjectMetadata stat(String remotePath) throws java.io.IOException {
+            Path path = resolve(remotePath);
+            return new CloudObjectMetadata(Files.size(path), Files.getLastModifiedTime(path).toString(), Map.of());
+        }
+
+        @Override
+        public void download(String remotePath, Path localDest) throws java.io.IOException {
+            Files.createDirectories(localDest.getParent());
+            Files.copy(resolve(remotePath), localDest, StandardCopyOption.REPLACE_EXISTING);
+        }
+
+        @Override
+        public void upload(Path localFile, String remotePath) throws java.io.IOException {
+            Path destination = resolve(remotePath);
+            Files.createDirectories(destination.getParent());
+            Files.copy(localFile, destination, StandardCopyOption.REPLACE_EXISTING);
+        }
+
+        @Override
+        public void delete(String remotePath) throws java.io.IOException {
+            Files.deleteIfExists(resolve(remotePath));
+        }
+
+        @Override
+        public void downloadProjectSmss(String root, Path localDir) throws java.io.IOException {
+            if (!root.isEmpty()) throw new java.io.IOException("Azure bulk SMSS copy must start at the account");
+            try (var containers = Files.list(account)) {
+                for (Path container : containers.filter(path -> {
+                    String name = path.getFileName().toString();
+                    return name.startsWith("project-") && name.endsWith("-smss");
+                }).toList()) {
+                    try (var files = Files.list(container)) {
+                        for (Path smss : files.filter(path -> path.toString().endsWith(".smss")).toList()) {
+                            download(account.relativize(smss).toString(),
+                                    localDir.resolve(container.getFileName().toString()).resolve(smss.getFileName()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private void projectSmss(String id, String type) throws Exception {
         Path smss = tempDir.resolve("remote/semoss-project/" + id + "-smss/App__" + id + ".smss");
         Files.createDirectories(smss.getParent());

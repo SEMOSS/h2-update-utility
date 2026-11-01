@@ -184,8 +184,10 @@ container: project-<projectId>-smss
 
 For S3, MinIO, and GCS, `SEARCH_PATH` must be `semoss-db`,
 `semoss-db/<engineId>`, `semoss-project`, or `semoss-project/<projectId>`.
-Azure processes one container per invocation, so `SEARCH_PATH` must be
-`db-<engineId>` or `project-<projectId>`.
+On Azure, `semoss-db` covers every `db-<engineId>` container and
+`semoss-project` every `project-<projectId>` container in the account (the
+connection must be allowed to list containers); `db-<engineId>` or
+`project-<projectId>` runs one container.
 
 ### Basic S3 example
 
@@ -299,8 +301,7 @@ export CONFIRM_SEMOSS_STOPPED=true
 java -jar target/h2-migration-service.jar
 ```
 
-Run a separate invocation for `semoss-db` and `semoss-project`. For Azure, run
-one invocation for each `db-<engineId>` or `project-<projectId>` container.
+Run a separate invocation for `semoss-db` and `semoss-project` (on every provider).
 
 ### Dry Run
 
@@ -383,8 +384,6 @@ through `/app/migrate-all.sh`:
   (Azure: `semoss-h2-migration`).
 - A dry run checks every scope; a real run stops at the first failed scope.
   Exit code `1` (Job `Failed`) means at least one target failed.
-- Azure needs `SCOPES` set to every `db-<engineId>` / `project-<projectId>`
-  container.
 
 ### Image CI
 

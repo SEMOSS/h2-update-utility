@@ -229,7 +229,9 @@ public final class RCloneClient implements CloudObjectStore {
         RemoteSpec remote = remote(root);
         List<String> command = command("copy", remote.argument(),
                 localDir.toAbsolutePath().normalize().toString(),
-                "--include=/*-smss/*.smss", "--transfers=32", "--checkers=32");
+                // Azure root is the account: only project SMSS containers, never engine (credential) ones
+                provider == CloudStorageLayout.Provider.AZURE ? "--include=/project-*-smss/*.smss" : "--include=/*-smss/*.smss",
+                "--transfers=32", "--checkers=32");
         ProcessResult result = execute(command, remote, BULK_TIMEOUT);
         ensureSuccess(result, "rclone copy project smss");
     }

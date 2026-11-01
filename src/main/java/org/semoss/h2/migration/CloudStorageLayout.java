@@ -44,16 +44,19 @@ public final class CloudStorageLayout {
     private final ScopeType scopeType;
     private final String fixedScopeId;
     private final String semossRootName;
+    // Azure run over every container of one type: "db-" or "project-"; null otherwise
+    private final String containerPrefix;
 
     private CloudStorageLayout(Provider provider, String storageRoot, String searchPath,
                                ScopeType scopeType, String fixedScopeId,
-                               String semossRootName) {
+                               String semossRootName, String containerPrefix) {
         this.provider = provider;
         this.storageRoot = storageRoot;
         this.searchPath = searchPath;
         this.scopeType = scopeType;
         this.fixedScopeId = fixedScopeId;
         this.semossRootName = semossRootName;
+        this.containerPrefix = containerPrefix;
     }
 
     public static CloudStorageLayout fromConfig(MigrationConfig config) {
@@ -87,14 +90,22 @@ public final class CloudStorageLayout {
         if (provider == Provider.AZURE) {
             if (searchPath.startsWith("db-") && !searchPath.endsWith("-smss")) {
                 return new CloudStorageLayout(provider, storageRoot, searchPath,
-                        ScopeType.ENGINE, requiredId(searchPath.substring(3)), "semoss-db");
+                        ScopeType.ENGINE, requiredId(searchPath.substring(3)), "semoss-db", null);
             }
             if (searchPath.startsWith("project-") && !searchPath.endsWith("-smss")) {
                 return new CloudStorageLayout(provider, storageRoot, searchPath,
-                        ScopeType.PROJECT, requiredId(searchPath.substring(8)), "semoss-project");
+                        ScopeType.PROJECT, requiredId(searchPath.substring(8)), "semoss-project", null);
+            }
+            // every db-<engineId> / project-<projectId> container in the account
+            if ("semoss-db".equals(searchPath)) {
+                return new CloudStorageLayout(provider, storageRoot, "", ScopeType.ENGINE, null, "semoss-db", "db-");
+            }
+            if ("semoss-project".equals(searchPath)) {
+                return new CloudStorageLayout(provider, storageRoot, "", ScopeType.PROJECT, null,
+                        "semoss-project", "project-");
             }
             throw new IllegalArgumentException(
-                    "Azure --search-path must be db-<engineId> or project-<projectId>");
+                    "Azure --search-path must be semoss-db, semoss-project, db-<engineId> or project-<projectId>");
         }
 
         String[] parts = searchPath.split("/");
@@ -112,7 +123,7 @@ public final class CloudStorageLayout {
                     "--search-path must begin with semoss-db or semoss-project");
         }
         String fixedId = parts.length == 2 ? requiredId(parts[1]) : null;
-        return new CloudStorageLayout(provider, storageRoot, searchPath, type, fixedId, parts[0]);
+        return new CloudStorageLayout(provider, storageRoot, searchPath, type, fixedId, parts[0], null);
     }
 
     public Provider provider() { return provider; }
@@ -123,13 +134,35 @@ public final class CloudStorageLayout {
         return join(storageRoot, searchPath);
     }
 
+    /** Listing filter; an all-containers Azure run only walks containers of its own type. */
+    public String listInclude(String pattern) {
+        return containerPrefix == null ? pattern : "/" + containerPrefix + "*/**" + pattern.substring(1);
+    }
+
+    /** Scope id of a listed path (relative to discoveryRoot), or null when it is not inside a scope. */
+    public String scopeIdOf(String listedPath) {
+        if (fixedScopeId != null) return fixedScopeId;
+        String path = value(listedPath).replace('\\', '/');
+        int slash = path.indexOf('/');
+        if (slash <= 0) return null;
+        String first = path.substring(0, slash);
+        if (containerPrefix == null) return first;
+        if (!first.startsWith(containerPrefix) || first.endsWith("-smss")) return null;
+        return first.substring(containerPrefix.length());
+    }
+
     public List<ScopeDescriptor> groupDatabases(List<String> listedPaths, Path stagingRoot) {
         Map<ScopeKey, List<RemoteDatabase>> grouped = new LinkedHashMap<>();
         for (String listed : listedPaths) {
+            if (containerPrefix != null && scopeIdOf(listed) == null) continue;
             String safe = validateRelativePath(listed, "remote database path");
             String id;
             String relative;
-            if (fixedScopeId != null) {
+            if (containerPrefix != null) {
+                // other containers (the -smss ones, other types, work storage) are not scopes
+                id = requiredId(scopeIdOf(safe));
+                relative = validateRelativePath(safe.substring(safe.indexOf('/') + 1), "scope-relative database path");
+            } else if (fixedScopeId != null) {
                 id = fixedScopeId;
                 relative = safe;
             } else {
