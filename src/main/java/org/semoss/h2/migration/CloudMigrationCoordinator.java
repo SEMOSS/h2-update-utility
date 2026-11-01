@@ -6,6 +6,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -112,18 +113,24 @@ final class CloudMigrationCoordinator {
                     "--confirm-semoss-stopped is required for an actual cloud migration");
         }
         try {
-            List<CloudStorageLayout.ScopeDescriptor> scopes = discovery.discoverScopes();
+            boolean typeFilter = !config.migrateAllProjectTypes();
+            CloudDatabaseDiscovery.Discovery found = discovery.discover(typeFilter);
+            List<CloudStorageLayout.ScopeDescriptor> scopes = found.scopes();
             if (scopes.isEmpty() && !config.dryRun()) {
                 throw new IllegalArgumentException(
                         "Actual cloud migration scope contains no H2 database objects");
             }
-            Set<String> workspaces = config.skipWorkspaceProjects()
-                    ? workspaceProjectIds(scopes) : Set.of();
-            for (CloudStorageLayout.ScopeDescriptor original : scopes) {
-                CloudStorageLayout.ScopeDescriptor scope = workspaces.contains(original.key().id())
-                        && original.key().type() == CloudStorageLayout.ScopeType.PROJECT
-                        ? withoutWorkspaceInsights(original) : original;
-                if (scope == null) continue;
+            List<CloudStorageLayout.ScopeDescriptor> filterable = typeFilter
+                    ? scopes.stream().filter(this::typeFiltered).toList() : List.of();
+            Map<String, String> types = filterable.isEmpty() ? Map.of() : projectTypes(filterable);
+            Set<String> withInsights = filterable.isEmpty() ? Set.of() : projectsWithInsights(found.mosfetFiles());
+            for (CloudStorageLayout.ScopeDescriptor scope : scopes) {
+                String type = types.get(scope.key().id());
+                if (typeFiltered(scope) && typeFilter && skippedType(type)
+                        && !withInsights.contains(scope.key().id())) {
+                    reportSkippedProject(scope, type);
+                    continue;
+                }
                 // free each scope's local copies once done; the bucket holds originals/backups
                 boolean failed = processScope(scope);
                 if (failed) {
@@ -140,12 +147,20 @@ final class CloudMigrationCoordinator {
     // per-scope listing is cheaper than one bulk copy for a handful of projects
     private static final int BULK_SMSS_THRESHOLD = 50;
 
-    /** Ids of discovered project scopes whose .smss says PROJECT_ENUM_TYPE=WORKSPACE. */
-    private Set<String> workspaceProjectIds(List<CloudStorageLayout.ScopeDescriptor> scopes)
+    // a search path naming one project is an explicit request: always migrate it
+    private boolean typeFiltered(CloudStorageLayout.ScopeDescriptor scope) {
+        return scope.key().type() == CloudStorageLayout.ScopeType.PROJECT
+                && !layout.discoveryRoot().equals(scope.sourceRoot());
+    }
+
+    // INSIGHTS, blank or no type (SEMOSS's default) always migrate
+    private static boolean skippedType(String type) {
+        return type != null && !type.isBlank() && !"INSIGHTS".equals(type);
+    }
+
+    /** Project id -> upper-cased PROJECT_ENUM_TYPE ("" if blank) from each project's .smss. */
+    private Map<String, String> projectTypes(List<CloudStorageLayout.ScopeDescriptor> projects)
             throws IOException, InterruptedException {
-        List<CloudStorageLayout.ScopeDescriptor> projects = scopes.stream()
-                .filter(scope -> scope.key().type() == CloudStorageLayout.ScopeType.PROJECT).toList();
-        if (projects.isEmpty()) return Set.of();
         Path dir = stagingRoot.resolve("project-smss");
         Files.createDirectories(dir);
         if (layout.provider() == CloudStorageLayout.Provider.AZURE || projects.size() <= BULK_SMSS_THRESHOLD) {
@@ -154,7 +169,7 @@ final class CloudMigrationCoordinator {
                 try {
                     names = objectStore.listFiles(scope.smssRoot(), "*.smss");
                 } catch (Exception e) {
-                    // no readable .smss: not provably a workspace, so it is migrated
+                    // no readable .smss: type unknown, so it is migrated
                     continue;
                 }
                 for (String name : names) {
@@ -167,42 +182,41 @@ final class CloudMigrationCoordinator {
             String sourceRoot = projects.get(0).sourceRoot();
             objectStore.downloadProjectSmss(sourceRoot.substring(0, sourceRoot.lastIndexOf('/')), dir);
         }
-        Set<String> ids = new HashSet<>();
+        Map<String, String> types = new HashMap<>();
         try (var files = Files.walk(dir)) {
             for (Path smss : files.filter(path -> path.toString().endsWith(".smss")).toList()) {
                 Map<String, String> values = SmssCredentialReader.loadValues(smss);
-                if (!"WORKSPACE".equalsIgnoreCase(values.getOrDefault("PROJECT_ENUM_TYPE", ""))) continue;
                 String id = values.getOrDefault("PROJECT", "");
-                if (id.isBlank() && smss.getParent().getFileName().toString().endsWith("-smss")) {
-                    String folder = smss.getParent().getFileName().toString();
-                    id = folder.substring(0, folder.length() - "-smss".length());
+                String folder = smss.getParent().getFileName().toString();
+                if (id.isBlank() && folder.endsWith("-smss")) id = folder.substring(0, folder.length() - "-smss".length());
+                if (!id.isBlank()) {
+                    types.put(id, values.getOrDefault("PROJECT_ENUM_TYPE", "").trim().toUpperCase(Locale.ROOT));
                 }
-                if (!id.isBlank()) ids.add(id);
             }
         }
-        LOGGER.info("Found " + ids.size() + " WORKSPACE project(s) among " + projects.size()
-                + " project scope(s); their root insights databases are skipped");
+        LOGGER.info("Read the project type of " + types.size() + " of " + projects.size() + " project scope(s)");
+        return types;
+    }
+
+    /** Project ids that have saved insights; the .mosfet paths are relative to the project root. */
+    private static Set<String> projectsWithInsights(List<String> mosfetFiles) {
+        Set<String> ids = new HashSet<>();
+        for (String file : mosfetFiles) {
+            int slash = file.indexOf('/');
+            if (slash > 0) ids.add(file.substring(0, slash));
+        }
         return ids;
     }
 
-    /** Drop the root insights DB of a workspace scope (SEMOSS recreates it); null if nothing is left. */
-    private CloudStorageLayout.ScopeDescriptor withoutWorkspaceInsights(CloudStorageLayout.ScopeDescriptor scope) {
-        List<CloudStorageLayout.RemoteDatabase> keep = new ArrayList<>();
+    private void reportSkippedProject(CloudStorageLayout.ScopeDescriptor scope, String type) {
+        String reason = "PROJECT_ENUM_TYPE=" + type + " project without saved insights (.mosfet); not migrated,"
+                + " SEMOSS recreates its insights database (--migrate-all-project-types to include)";
         for (CloudStorageLayout.RemoteDatabase database : scope.databases()) {
-            String name = database.relativePath().toLowerCase(Locale.ROOT);
-            if (!name.equals("insights_database.mv.db") && !name.equals("insights_database.h2.db")) {
-                keep.add(database);
-                continue;
-            }
             DatabaseTarget target = DatabaseClassifier.classify(stagingRoot, database.localPath());
-            report.addResult(target, Status.SKIPPED,
-                    "WORKSPACE project (--skip-workspace-projects); SEMOSS recreates its insights database", 0)
+            report.addResult(target, Status.SKIPPED, reason, 0)
                     .cloudIdentity(layout.provider().name(), objectStore.authenticationMode(),
                             scope.key().type().name(), scope.key().id(), database.remotePath());
         }
-        if (keep.isEmpty()) return null;
-        return new CloudStorageLayout.ScopeDescriptor(scope.key(), scope.sourceRoot(), scope.smssRoot(),
-                scope.localRoot(), keep);
     }
 
     /** Returns true when the scope has a FAILED row that touched local files, so its local backups are kept. */

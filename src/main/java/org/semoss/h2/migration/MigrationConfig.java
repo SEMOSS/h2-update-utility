@@ -42,7 +42,7 @@ public record MigrationConfig(
         String gcsServiceAccountJson,
         String gcsTransferBackend,
         String gcloudPath,
-        boolean skipWorkspaceProjects
+        boolean migrateAllProjectTypes
 ) {
 
     public enum MigrationMode {
@@ -66,7 +66,7 @@ public record MigrationConfig(
         return defaultUsername == null ? "" : defaultUsername;
     }
 
-    /** Every setting except skipWorkspaceProjects (off). */
+    /** Every setting except migrateAllProjectTypes (off). */
     public MigrationConfig(
             MigrationMode mode, Path dbDir, Path backupDir, boolean dryRun,
             String defaultUsername, String defaultPassword, String storageProvider,
@@ -164,7 +164,7 @@ public record MigrationConfig(
                 "MINIO_ENDPOINT", "MINIO_REGION", "MINIO_ACCESS_KEY", "MINIO_SECRET_KEY",
                 "MINIO_BUCKET",
                 "RCLONE", "ADDITIONAL_RCLONE_PARAMETERS",
-                "SEARCH_PATH", "CONFIRM_SEMOSS_STOPPED", "SKIP_WORKSPACE_PROJECTS"
+                "SEARCH_PATH", "CONFIRM_SEMOSS_STOPPED", "MIGRATE_ALL_PROJECT_TYPES"
         };
         for (String key : envKeys) {
             String val = System.getenv(key);
@@ -235,7 +235,7 @@ public record MigrationConfig(
                 p.getProperty("GCS_SERVICE_ACCOUNT_JSON", ""),
                 p.getProperty("GCS_TRANSFER_BACKEND", DEFAULT_GCS_TRANSFER_BACKEND),
                 p.getProperty("GCLOUD", DEFAULT_GCLOUD),
-                bool(p, "SKIP_WORKSPACE_PROJECTS")
+                bool(p, "MIGRATE_ALL_PROJECT_TYPES")
         );
     }
 
@@ -253,7 +253,7 @@ public record MigrationConfig(
                 + ", gcsTransferBackend=" + gcsTransferBackend
                 + ", searchPath=" + searchPath
                 + ", confirmSemossStopped=" + confirmSemossStopped
-                + ", skipWorkspaceProjects=" + skipWorkspaceProjects
+                + ", migrateAllProjectTypes=" + migrateAllProjectTypes
                 + ", cloudCredentials=<redacted>]";
     }
 
@@ -287,8 +287,8 @@ public record MigrationConfig(
                   --minio-bucket=BUCKET
                   --rclone=PATH            Path to rclone binary (default: rclone)
                   --confirm-semoss-stopped Required for a non-dry-run cloud migration
-                  --skip-workspace-projects  Cloud: leave the root insights DB of WORKSPACE projects
-                                           (per project .smss) unmigrated; SEMOSS recreates it
+                  --migrate-all-project-types  Cloud: also migrate projects whose .smss type is not
+                                           INSIGHTS and that have no saved insights (.mosfet)
                   --s3-session-token=TOKEN Optional temporary AWS session token
                   --gcs-service-account-json=JSON     Optional injected GCP service-account JSON
                 """;

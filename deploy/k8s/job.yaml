@@ -33,8 +33,8 @@ spec:
               value: "true"
             - name: CONFIRM_SEMOSS_STOPPED
               value: "false"
-            # "true": leave WORKSPACE projects' root insights DB (SEMOSS recreates it); see README
-            - name: SKIP_WORKSPACE_PROJECTS
+            # "true": also migrate non-INSIGHTS projects without saved insights; see README
+            - name: MIGRATE_ALL_PROJECT_TYPES
               value: "false"
             # S3/MinIO/GCS: both prefixes. Azure: list every db-<engineId> and project-<projectId>
             - name: SCOPES

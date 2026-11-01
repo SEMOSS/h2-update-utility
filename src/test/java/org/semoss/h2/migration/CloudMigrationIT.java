@@ -174,65 +174,84 @@ class CloudMigrationIT {
     }
 
     @Test
-    void skipWorkspaceProjectsLeavesOnlyTheirRootInsightsDatabase() throws Exception {
-        Path workspace = tempDir.resolve("remote/semoss-project/ws-id");
-        Path wsInsights = workspace.resolve("insights_database.mv.db");
-        Path wsFrame = workspace.resolve("app_root/version/insight/H2_Store_SAVED.mv.db");
-        Path code = tempDir.resolve("remote/semoss-project/code-id/insights_database.mv.db");
-        createSimpleH2(wsInsights, "WS_DATA");
-        createSimpleH2(wsFrame, "FRAME_DATA");
-        createSimpleH2(code, "CODE_DATA");
-        projectSmss("ws-id", "WORKSPACE");
+    void projectScopesMigrateOnlyInsightsTypeOrProjectsWithSavedInsightsByDefault() throws Exception {
+        Map<String, Path> dbs = new java.util.LinkedHashMap<>();
+        for (String id : List.of("insights-id", "blank-id", "nosmss-id", "code-id", "ws-id", "code-saved-id")) {
+            Path db = tempDir.resolve("remote/semoss-project/" + id + "/insights_database.mv.db");
+            createSimpleH2(db, "T");
+            dbs.put(id, db);
+        }
+        Path frame = tempDir.resolve("remote/semoss-project/code-id/app_root/version/i1/H2_Store_X.mv.db");
+        createSimpleH2(frame, "FRAME");
+        projectSmss("insights-id", "INSIGHTS");
+        projectSmss("blank-id", "");
         projectSmss("code-id", "CODE");
-        String wsHash = CloudDatabaseDiscovery.sha256(wsInsights);
+        projectSmss("ws-id", "WORKSPACE");
+        projectSmss("code-saved-id", "CODE");
+        Path mosfet = tempDir.resolve("remote/semoss-project/code-saved-id/app_root/version/i2/i2.mosfet");
+        Files.createDirectories(mosfet.getParent());
+        Files.writeString(mosfet, "{}");
+        String codeHash = CloudDatabaseDiscovery.sha256(dbs.get("code-id"));
 
-        H2MigrationService service = new H2MigrationService(
-                config(false, true, "semoss-project", "--skip-workspace-projects"));
+        H2MigrationService service = new H2MigrationService(config(false, true, "semoss-project"));
         int exitCode = service.run();
 
         assertEquals(0, exitCode);
-        assertEquals(2, service.getReport().successCount());
-        assertEquals(1, service.getReport().skippedCount());
-        assertEquals(wsHash, CloudDatabaseDiscovery.sha256(wsInsights));
-        assertTrue(H2VersionDetector.detect(wsInsights).needsMigration(), "workspace insights stays 1.x");
-        assertFalse(H2VersionDetector.detect(wsFrame).needsMigration(), "other workspace H2 still migrates");
-        assertFalse(H2VersionDetector.detect(code).needsMigration());
-        assertTrue(service.getReport().toJson().contains("--skip-workspace-projects"));
+        assertEquals(4, service.getReport().successCount());
+        assertEquals(3, service.getReport().skippedCount());
+        for (String id : List.of("insights-id", "blank-id", "nosmss-id", "code-saved-id")) {
+            assertFalse(H2VersionDetector.detect(dbs.get(id)).needsMigration(), id + " migrates");
+        }
+        assertTrue(H2VersionDetector.detect(dbs.get("ws-id")).needsMigration());
+        assertTrue(H2VersionDetector.detect(frame).needsMigration(), "a skipped project keeps all its H2 files");
+        assertEquals(codeHash, CloudDatabaseDiscovery.sha256(dbs.get("code-id")));
+        assertTrue(service.getReport().toJson().contains("CODE project without saved insights"));
     }
 
     @Test
-    void skipWorkspaceProjectsUsesOneBulkSmssCopyForManyProjects() throws Exception {
-        // more scopes than the per-scope threshold; workspace DBs are junk so any processing would fail
+    void migrateAllProjectTypesOverridesTheTypeFilter() throws Exception {
+        Path code = tempDir.resolve("remote/semoss-project/code-id/insights_database.mv.db");
+        createSimpleH2(code, "T");
+        projectSmss("code-id", "CODE");
+
+        H2MigrationService service = new H2MigrationService(
+                config(false, true, "semoss-project", "--migrate-all-project-types"));
+
+        assertEquals(0, service.run());
+        assertFalse(H2VersionDetector.detect(code).needsMigration());
+    }
+
+    @Test
+    void anExplicitProjectScopeIsAlwaysMigrated() throws Exception {
+        Path code = tempDir.resolve("remote/semoss-project/code-id/insights_database.mv.db");
+        createSimpleH2(code, "T");
+        projectSmss("code-id", "CODE");
+
+        H2MigrationService service = new H2MigrationService(config(false, true, "semoss-project/code-id"));
+
+        assertEquals(0, service.run());
+        assertFalse(H2VersionDetector.detect(code).needsMigration());
+    }
+
+    @Test
+    void manySkippedProjectsUseOneBulkSmssCopy() throws Exception {
+        // more scopes than the per-scope threshold; skipped DBs are junk so any processing would fail
         for (int i = 0; i < 55; i++) {
             Path junk = tempDir.resolve("remote/semoss-project/ws-" + i + "/insights_database.mv.db");
             Files.createDirectories(junk.getParent());
             Files.writeString(junk, "not a database");
-            projectSmss("ws-" + i, "WORKSPACE");
+            projectSmss("ws-" + i, i % 2 == 0 ? "WORKSPACE" : "BLOCKS");
         }
-        Path code = tempDir.resolve("remote/semoss-project/code-id/insights_database.mv.db");
-        createSimpleH2(code, "CODE_DATA");
-        projectSmss("code-id", "CODE");
+        Path insights = tempDir.resolve("remote/semoss-project/insights-id/insights_database.mv.db");
+        createSimpleH2(insights, "T");
+        projectSmss("insights-id", "INSIGHTS");
 
-        H2MigrationService service = new H2MigrationService(
-                config(false, true, "semoss-project", "--skip-workspace-projects"));
+        H2MigrationService service = new H2MigrationService(config(false, true, "semoss-project"));
         int exitCode = service.run();
 
         assertEquals(0, exitCode);
         assertEquals(1, service.getReport().successCount());
         assertEquals(55, service.getReport().skippedCount());
-        assertFalse(H2VersionDetector.detect(code).needsMigration());
-    }
-
-    @Test
-    void workspaceInsightsMigrateWhenTheFlagIsOff() throws Exception {
-        Path wsInsights = tempDir.resolve("remote/semoss-project/ws-id/insights_database.mv.db");
-        createSimpleH2(wsInsights, "WS_DATA");
-        projectSmss("ws-id", "WORKSPACE");
-
-        H2MigrationService service = new H2MigrationService(config(false, true, "semoss-project"));
-
-        assertEquals(0, service.run());
-        assertFalse(H2VersionDetector.detect(wsInsights).needsMigration());
     }
 
     private void projectSmss(String id, String type) throws Exception {

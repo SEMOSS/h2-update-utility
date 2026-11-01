@@ -322,7 +322,7 @@ public final class GcloudStorageClient implements CloudObjectStore {
     }
 
     private static String validateInclude(String include) {
-        if ("*.mv.db".equals(include) || "*.smss".equals(include)) return include;
+        if ("*.mv.db".equals(include) || "*.smss".equals(include) || "*.mosfet".equals(include)) return include;
         throw new IllegalArgumentException("Unsupported gcloud include pattern: " + include);
     }
 
