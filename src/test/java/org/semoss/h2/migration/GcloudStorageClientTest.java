@@ -68,6 +68,21 @@ class GcloudStorageClientTest {
     }
 
     @Test
+    void projectSmssBulkCopyUsesOneWildcardAndToleratesNoMatches() throws Exception {
+        CapturingExecutor executor = new CapturingExecutor();
+        GcloudStorageClient client = GcloudStorageClient.fromConfig(config(), executor, Map.of());
+        Path dir = tempDir.resolve("smss");
+
+        client.downloadProjectSmss("bucket/semoss-project", dir);
+
+        assertEquals(List.of("storage", "cp", "gs://bucket/semoss-project/*-smss/*.smss", dir + "/"),
+                executor.command.subList(1, 5));
+        executor.exitCode = 1;
+        executor.stderr = "ERROR: (gcloud.storage.cp) The following URLs matched no objects or files";
+        client.downloadProjectSmss("bucket/semoss-project", dir);
+    }
+
+    @Test
     void listFilesParsesGcloudJsonAndReturnsPathsRelativeToSearchRoot() throws Exception {
         CapturingExecutor executor = new CapturingExecutor();
         executor.stdout = """

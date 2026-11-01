@@ -47,6 +47,29 @@ public final class CloudDatabaseDiscovery {
         this.stagingDir = stagingDir.toAbsolutePath().normalize();
     }
 
+    /** Scopes plus the saved-insight (.mosfet) files found under the same root. */
+    public record Discovery(List<CloudStorageLayout.ScopeDescriptor> scopes, List<String> mosfetFiles) {}
+
+    public Discovery discover(boolean withMosfets) throws IOException, InterruptedException {
+        if (!withMosfets) return new Discovery(discoverScopes(), List.of());
+        String root = layout.discoveryRoot();
+        List<String> databases = new ArrayList<>();
+        List<String> mosfets = new ArrayList<>();
+        if (objectStore instanceof RCloneClient) {
+            // one listing for both: the walk, not the filter, is what costs time
+            for (String file : objectStore.listFiles(root, "*.{mv.db,mosfet}")) {
+                (file.endsWith(".mosfet") ? mosfets : databases).add(file);
+            }
+        } else {
+            databases.addAll(objectStore.listFiles(root, "*.mv.db"));
+            mosfets.addAll(objectStore.listFiles(root, "*.mosfet"));
+        }
+        List<CloudStorageLayout.ScopeDescriptor> scopes = layout.groupDatabases(databases, stagingDir);
+        LOGGER.info("Found " + databases.size() + " database object(s) in " + scopes.size()
+                + " SEMOSS scope(s) and " + mosfets.size() + " saved insight file(s)");
+        return new Discovery(scopes, List.copyOf(mosfets));
+    }
+
     public List<CloudStorageLayout.ScopeDescriptor> discoverScopes()
             throws IOException, InterruptedException {
         String root = layout.discoveryRoot();

@@ -166,7 +166,11 @@ reads as 1-based, which silently shifted values on tables without a `0`),
 indexes on `NULL`-typed columns are stripped, and a never-initialized file is
 exported from a scratch copy instead of failing read-only. macOS metadata
 sidecars (`._*.mv.db`, `__MACOSX/`) are `SKIPPED` as `MACOS_METADATA` and left
-in place; they no longer block their engine or project.
+in place; they no longer block their engine or project. Cloud project scopes
+migrate only INSIGHTS/untyped projects and projects with saved insights
+(`*.mosfet`) by default; other types are `SKIPPED` (needs a SEMOSS build that
+recreates their insights DB). `MIGRATE_ALL_PROJECT_TYPES=true` or an explicit
+`semoss-project/<id>` scope migrates them.
 Already-converted files are not retroactively repaired for changed column types;
 verify these fixes on fresh copies of the pre-migration files.
 

@@ -23,6 +23,14 @@ One Job runs every scope in order (`semoss-db`, then `semoss-project`) through
   (Azure: `semoss-h2-migration` container).
 - Azure: set `SCOPES` to every `db-<engineId>` and `project-<projectId>`
   container; the utility handles one container per invocation.
+- Project scopes migrate by default only projects whose `.smss` has
+  `PROJECT_ENUM_TYPE=INSIGHTS`, a blank or missing type, or no `.smss`, plus any
+  project with saved insights (a `*.mosfet` file). Other projects (BLOCKS,
+  CODE, WORKSPACE, SKILL, NOTEBOOK, AUTOMATION without saved insights) are
+  `SKIPPED` with all their H2 files; the SEMOSS build must recreate their
+  insights database. `MIGRATE_ALL_PROJECT_TYPES=true`, or naming one project
+  in `SCOPES` (`semoss-project/<id>`), migrates them. Project `.smss` files come
+  from one parallel copy (rclone ~17 s for 7.8k projects; gcloud ~8 min).
 - Size `/work` (`emptyDir` `sizeLimit` and ephemeral-storage, or the PVC) for about 3x the largest single engine/project scope; each scope's
   local files are deleted once it finishes (a failed scope keeps its local backups).
 

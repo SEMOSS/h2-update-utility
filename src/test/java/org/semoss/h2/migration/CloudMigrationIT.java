@@ -174,6 +174,93 @@ class CloudMigrationIT {
     }
 
     @Test
+    void projectScopesMigrateOnlyInsightsTypeOrProjectsWithSavedInsightsByDefault() throws Exception {
+        Map<String, Path> dbs = new java.util.LinkedHashMap<>();
+        for (String id : List.of("insights-id", "blank-id", "nosmss-id", "code-id", "ws-id", "code-saved-id")) {
+            Path db = tempDir.resolve("remote/semoss-project/" + id + "/insights_database.mv.db");
+            createSimpleH2(db, "T");
+            dbs.put(id, db);
+        }
+        Path frame = tempDir.resolve("remote/semoss-project/code-id/app_root/version/i1/H2_Store_X.mv.db");
+        createSimpleH2(frame, "FRAME");
+        projectSmss("insights-id", "INSIGHTS");
+        projectSmss("blank-id", "");
+        projectSmss("code-id", "CODE");
+        projectSmss("ws-id", "WORKSPACE");
+        projectSmss("code-saved-id", "CODE");
+        Path mosfet = tempDir.resolve("remote/semoss-project/code-saved-id/app_root/version/i2/i2.mosfet");
+        Files.createDirectories(mosfet.getParent());
+        Files.writeString(mosfet, "{}");
+        String codeHash = CloudDatabaseDiscovery.sha256(dbs.get("code-id"));
+
+        H2MigrationService service = new H2MigrationService(config(false, true, "semoss-project"));
+        int exitCode = service.run();
+
+        assertEquals(0, exitCode);
+        assertEquals(4, service.getReport().successCount());
+        assertEquals(3, service.getReport().skippedCount());
+        for (String id : List.of("insights-id", "blank-id", "nosmss-id", "code-saved-id")) {
+            assertFalse(H2VersionDetector.detect(dbs.get(id)).needsMigration(), id + " migrates");
+        }
+        assertTrue(H2VersionDetector.detect(dbs.get("ws-id")).needsMigration());
+        assertTrue(H2VersionDetector.detect(frame).needsMigration(), "a skipped project keeps all its H2 files");
+        assertEquals(codeHash, CloudDatabaseDiscovery.sha256(dbs.get("code-id")));
+        assertTrue(service.getReport().toJson().contains("CODE project without saved insights"));
+    }
+
+    @Test
+    void migrateAllProjectTypesOverridesTheTypeFilter() throws Exception {
+        Path code = tempDir.resolve("remote/semoss-project/code-id/insights_database.mv.db");
+        createSimpleH2(code, "T");
+        projectSmss("code-id", "CODE");
+
+        H2MigrationService service = new H2MigrationService(
+                config(false, true, "semoss-project", "--migrate-all-project-types"));
+
+        assertEquals(0, service.run());
+        assertFalse(H2VersionDetector.detect(code).needsMigration());
+    }
+
+    @Test
+    void anExplicitProjectScopeIsAlwaysMigrated() throws Exception {
+        Path code = tempDir.resolve("remote/semoss-project/code-id/insights_database.mv.db");
+        createSimpleH2(code, "T");
+        projectSmss("code-id", "CODE");
+
+        H2MigrationService service = new H2MigrationService(config(false, true, "semoss-project/code-id"));
+
+        assertEquals(0, service.run());
+        assertFalse(H2VersionDetector.detect(code).needsMigration());
+    }
+
+    @Test
+    void manySkippedProjectsUseOneBulkSmssCopy() throws Exception {
+        // more scopes than the per-scope threshold; skipped DBs are junk so any processing would fail
+        for (int i = 0; i < 55; i++) {
+            Path junk = tempDir.resolve("remote/semoss-project/ws-" + i + "/insights_database.mv.db");
+            Files.createDirectories(junk.getParent());
+            Files.writeString(junk, "not a database");
+            projectSmss("ws-" + i, i % 2 == 0 ? "WORKSPACE" : "BLOCKS");
+        }
+        Path insights = tempDir.resolve("remote/semoss-project/insights-id/insights_database.mv.db");
+        createSimpleH2(insights, "T");
+        projectSmss("insights-id", "INSIGHTS");
+
+        H2MigrationService service = new H2MigrationService(config(false, true, "semoss-project"));
+        int exitCode = service.run();
+
+        assertEquals(0, exitCode);
+        assertEquals(1, service.getReport().successCount());
+        assertEquals(55, service.getReport().skippedCount());
+    }
+
+    private void projectSmss(String id, String type) throws Exception {
+        Path smss = tempDir.resolve("remote/semoss-project/" + id + "-smss/App__" + id + ".smss");
+        Files.createDirectories(smss.getParent());
+        Files.writeString(smss, "PROJECT\t" + id + "\nPROJECT_ALIAS\tApp\nPROJECT_ENUM_TYPE\t" + type + "\n");
+    }
+
+    @Test
     void unknownProjectDatabaseFailsScopeWithoutRemoteWrites() throws Exception {
         Path unknown = tempDir.resolve("remote/semoss-project/project-id/other.mv.db");
         createSimpleH2(unknown, "UNKNOWN_DATA");
@@ -258,7 +345,7 @@ class CloudMigrationIT {
         }
     }
 
-    private MigrationConfig config(boolean dryRun, boolean confirmed, String searchPath) {
+    private MigrationConfig config(boolean dryRun, boolean confirmed, String searchPath, String... extra) {
         var args = new java.util.ArrayList<>(java.util.List.of(
                 "--mode=cloud",
                 "--db-dir=" + tempDir.resolve("remote"),
@@ -267,6 +354,7 @@ class CloudMigrationIT {
                 "--search-path=" + searchPath));
         if (dryRun) args.add("--dry-run");
         if (confirmed) args.add("--confirm-semoss-stopped");
+        args.addAll(java.util.List.of(extra));
         return MigrationConfig.fromArgs(args.toArray(String[]::new));
     }
 
@@ -324,6 +412,11 @@ class CloudMigrationIT {
         @Override
         public void delete(String remotePath) throws java.io.IOException {
             Files.deleteIfExists(Path.of(remotePath));
+        }
+
+        @Override
+        public void downloadProjectSmss(String root, Path localDir) {
+            throw new UnsupportedOperationException("not used by fault-injection tests");
         }
     }
 }

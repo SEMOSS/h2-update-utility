@@ -41,7 +41,8 @@ public record MigrationConfig(
         String s3SessionToken,
         String gcsServiceAccountJson,
         String gcsTransferBackend,
-        String gcloudPath
+        String gcloudPath,
+        boolean migrateAllProjectTypes
 ) {
 
     public enum MigrationMode {
@@ -63,6 +64,29 @@ public record MigrationConfig(
     /** H2 defaults an omitted SMSS username to empty; preserve explicit overrides. */
     public String primaryDefaultUsername() {
         return defaultUsername == null ? "" : defaultUsername;
+    }
+
+    /** Every setting except migrateAllProjectTypes (off). */
+    public MigrationConfig(
+            MigrationMode mode, Path dbDir, Path backupDir, boolean dryRun,
+            String defaultUsername, String defaultPassword, String storageProvider,
+            String s3Region, String s3Bucket, String s3AccessKey, String s3SecretKey,
+            String azAccountName, String azPrimaryKey, String azConnString,
+            boolean azUseMsi,
+            String gcsServiceAccountFile, String gcsBucket, String gcsRegion,
+            String minioEndpoint, String minioRegion, String minioAccessKey,
+            String minioSecretKey, String minioBucket, String rclonePath,
+            String additionalRcloneParams, String searchPath, boolean confirmSemossStopped,
+            String s3SessionToken, String gcsServiceAccountJson, String gcsTransferBackend,
+            String gcloudPath) {
+        this(mode, dbDir, backupDir, dryRun, defaultUsername, defaultPassword,
+                storageProvider, s3Region, s3Bucket, s3AccessKey, s3SecretKey,
+                azAccountName, azPrimaryKey, azConnString, azUseMsi,
+                gcsServiceAccountFile, gcsBucket, gcsRegion,
+                minioEndpoint, minioRegion, minioAccessKey, minioSecretKey,
+                minioBucket, rclonePath, additionalRcloneParams, searchPath,
+                confirmSemossStopped, s3SessionToken, gcsServiceAccountJson,
+                gcsTransferBackend, gcloudPath, false);
     }
 
     /** Backward-compatible constructor for existing callers and fixtures. */
@@ -140,7 +164,7 @@ public record MigrationConfig(
                 "MINIO_ENDPOINT", "MINIO_REGION", "MINIO_ACCESS_KEY", "MINIO_SECRET_KEY",
                 "MINIO_BUCKET",
                 "RCLONE", "ADDITIONAL_RCLONE_PARAMETERS",
-                "SEARCH_PATH", "CONFIRM_SEMOSS_STOPPED"
+                "SEARCH_PATH", "CONFIRM_SEMOSS_STOPPED", "MIGRATE_ALL_PROJECT_TYPES"
         };
         for (String key : envKeys) {
             String val = System.getenv(key);
@@ -210,7 +234,8 @@ public record MigrationConfig(
                 p.getProperty("S3_SESSION_TOKEN", ""),
                 p.getProperty("GCS_SERVICE_ACCOUNT_JSON", ""),
                 p.getProperty("GCS_TRANSFER_BACKEND", DEFAULT_GCS_TRANSFER_BACKEND),
-                p.getProperty("GCLOUD", DEFAULT_GCLOUD)
+                p.getProperty("GCLOUD", DEFAULT_GCLOUD),
+                bool(p, "MIGRATE_ALL_PROJECT_TYPES")
         );
     }
 
@@ -228,6 +253,7 @@ public record MigrationConfig(
                 + ", gcsTransferBackend=" + gcsTransferBackend
                 + ", searchPath=" + searchPath
                 + ", confirmSemossStopped=" + confirmSemossStopped
+                + ", migrateAllProjectTypes=" + migrateAllProjectTypes
                 + ", cloudCredentials=<redacted>]";
     }
 
@@ -261,6 +287,8 @@ public record MigrationConfig(
                   --minio-bucket=BUCKET
                   --rclone=PATH            Path to rclone binary (default: rclone)
                   --confirm-semoss-stopped Required for a non-dry-run cloud migration
+                  --migrate-all-project-types  Cloud: also migrate projects whose .smss type is not
+                                           INSIGHTS and that have no saved insights (.mosfet)
                   --s3-session-token=TOKEN Optional temporary AWS session token
                   --gcs-service-account-json=JSON     Optional injected GCP service-account JSON
                 """;
