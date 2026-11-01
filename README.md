@@ -40,6 +40,10 @@ selected merely because its name sorts first.
 - **macOS metadata skip**: AppleDouble sidecars (`._*.mv.db`, anything under
   `__MACOSX/`, or content starting `00 05 16 07`) are reported `SKIPPED` as
   `MACOS_METADATA` and left in place instead of failing their engine/project
+- **Workspace skip (opt-in)**: `--skip-workspace-projects` /
+  `SKIP_WORKSPACE_PROJECTS=true` leaves the root insights DB of `WORKSPACE`
+  projects (per their `.smss`) unmigrated and `SKIPPED`, for SEMOSS builds that
+  recreate it lazily; every other H2 file still migrates
 - **SEMOSS target classification**: Distinguishes system stores, user engines,
   generated audit/insight databases, persisted insight-frame stores, and live
   `InsightCache` files before credentials are selected

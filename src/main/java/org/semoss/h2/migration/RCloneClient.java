@@ -28,6 +28,7 @@ public final class RCloneClient implements CloudObjectStore {
 
     private static final Logger LOGGER = LogManager.getLogger(RCloneClient.class);
     private static final Duration TIMEOUT = Duration.ofMinutes(10);
+    private static final Duration BULK_TIMEOUT = Duration.ofMinutes(60);
     private static final String REMOTE_NAME = "semossh2";
     private static final String ENV_PREFIX = "RCLONE_CONFIG_SEMOSSH2_";
 
@@ -223,7 +224,22 @@ public final class RCloneClient implements CloudObjectStore {
         ensureSuccess(result, "rclone deletefile");
     }
 
+    public void downloadProjectSmss(String root, Path localDir)
+            throws IOException, InterruptedException {
+        RemoteSpec remote = remote(root);
+        List<String> command = command("copy", remote.argument(),
+                localDir.toAbsolutePath().normalize().toString(),
+                "--include=/*-smss/*.smss", "--transfers=32", "--checkers=32");
+        ProcessResult result = execute(command, remote, BULK_TIMEOUT);
+        ensureSuccess(result, "rclone copy project smss");
+    }
+
     private ProcessResult execute(List<String> command, RemoteSpec remote)
+            throws IOException, InterruptedException {
+        return execute(command, remote, TIMEOUT);
+    }
+
+    private ProcessResult execute(List<String> command, RemoteSpec remote, Duration timeout)
             throws IOException, InterruptedException {
         List<String> fullCommand = new ArrayList<>(command);
         fullCommand.addAll(additionalParams);
@@ -233,7 +249,7 @@ public final class RCloneClient implements CloudObjectStore {
         redactions.addAll(remote.redactions());
         ProcessResult raw;
         try {
-            raw = executor.execute(fullCommand, remote.environment(), TIMEOUT);
+            raw = executor.execute(fullCommand, remote.environment(), timeout);
         } catch (IOException e) {
             String message = e.getMessage() == null || e.getMessage().isBlank()
                     ? "rclone process failed" : e.getMessage();

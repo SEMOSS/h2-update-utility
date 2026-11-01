@@ -6,8 +6,11 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.LinkedHashMap;
 
@@ -114,7 +117,13 @@ final class CloudMigrationCoordinator {
                 throw new IllegalArgumentException(
                         "Actual cloud migration scope contains no H2 database objects");
             }
-            for (CloudStorageLayout.ScopeDescriptor scope : scopes) {
+            Set<String> workspaces = config.skipWorkspaceProjects()
+                    ? workspaceProjectIds(scopes) : Set.of();
+            for (CloudStorageLayout.ScopeDescriptor original : scopes) {
+                CloudStorageLayout.ScopeDescriptor scope = workspaces.contains(original.key().id())
+                        && original.key().type() == CloudStorageLayout.ScopeType.PROJECT
+                        ? withoutWorkspaceInsights(original) : original;
+                if (scope == null) continue;
                 // free each scope's local copies once done; the bucket holds originals/backups
                 boolean failed = processScope(scope);
                 if (failed) {
@@ -126,6 +135,74 @@ final class CloudMigrationCoordinator {
         } finally {
             cleanupStaging();
         }
+    }
+
+    // per-scope listing is cheaper than one bulk copy for a handful of projects
+    private static final int BULK_SMSS_THRESHOLD = 50;
+
+    /** Ids of discovered project scopes whose .smss says PROJECT_ENUM_TYPE=WORKSPACE. */
+    private Set<String> workspaceProjectIds(List<CloudStorageLayout.ScopeDescriptor> scopes)
+            throws IOException, InterruptedException {
+        List<CloudStorageLayout.ScopeDescriptor> projects = scopes.stream()
+                .filter(scope -> scope.key().type() == CloudStorageLayout.ScopeType.PROJECT).toList();
+        if (projects.isEmpty()) return Set.of();
+        Path dir = stagingRoot.resolve("project-smss");
+        Files.createDirectories(dir);
+        if (layout.provider() == CloudStorageLayout.Provider.AZURE || projects.size() <= BULK_SMSS_THRESHOLD) {
+            for (CloudStorageLayout.ScopeDescriptor scope : projects) {
+                List<String> names;
+                try {
+                    names = objectStore.listFiles(scope.smssRoot(), "*.smss");
+                } catch (Exception e) {
+                    // no readable .smss: not provably a workspace, so it is migrated
+                    continue;
+                }
+                for (String name : names) {
+                    String safe = CloudStorageLayout.validateRelativePath(name, "remote SMSS path");
+                    objectStore.download(scope.smssRoot() + "/" + safe,
+                            dir.resolve(scope.key().id() + "-smss").resolve(safe));
+                }
+            }
+        } else {
+            String sourceRoot = projects.get(0).sourceRoot();
+            objectStore.downloadProjectSmss(sourceRoot.substring(0, sourceRoot.lastIndexOf('/')), dir);
+        }
+        Set<String> ids = new HashSet<>();
+        try (var files = Files.walk(dir)) {
+            for (Path smss : files.filter(path -> path.toString().endsWith(".smss")).toList()) {
+                Map<String, String> values = SmssCredentialReader.loadValues(smss);
+                if (!"WORKSPACE".equalsIgnoreCase(values.getOrDefault("PROJECT_ENUM_TYPE", ""))) continue;
+                String id = values.getOrDefault("PROJECT", "");
+                if (id.isBlank() && smss.getParent().getFileName().toString().endsWith("-smss")) {
+                    String folder = smss.getParent().getFileName().toString();
+                    id = folder.substring(0, folder.length() - "-smss".length());
+                }
+                if (!id.isBlank()) ids.add(id);
+            }
+        }
+        LOGGER.info("Found " + ids.size() + " WORKSPACE project(s) among " + projects.size()
+                + " project scope(s); their root insights databases are skipped");
+        return ids;
+    }
+
+    /** Drop the root insights DB of a workspace scope (SEMOSS recreates it); null if nothing is left. */
+    private CloudStorageLayout.ScopeDescriptor withoutWorkspaceInsights(CloudStorageLayout.ScopeDescriptor scope) {
+        List<CloudStorageLayout.RemoteDatabase> keep = new ArrayList<>();
+        for (CloudStorageLayout.RemoteDatabase database : scope.databases()) {
+            String name = database.relativePath().toLowerCase(Locale.ROOT);
+            if (!name.equals("insights_database.mv.db") && !name.equals("insights_database.h2.db")) {
+                keep.add(database);
+                continue;
+            }
+            DatabaseTarget target = DatabaseClassifier.classify(stagingRoot, database.localPath());
+            report.addResult(target, Status.SKIPPED,
+                    "WORKSPACE project (--skip-workspace-projects); SEMOSS recreates its insights database", 0)
+                    .cloudIdentity(layout.provider().name(), objectStore.authenticationMode(),
+                            scope.key().type().name(), scope.key().id(), database.remotePath());
+        }
+        if (keep.isEmpty()) return null;
+        return new CloudStorageLayout.ScopeDescriptor(scope.key(), scope.sourceRoot(), scope.smssRoot(),
+                scope.localRoot(), keep);
     }
 
     /** Returns true when the scope has a FAILED row that touched local files, so its local backups are kept. */

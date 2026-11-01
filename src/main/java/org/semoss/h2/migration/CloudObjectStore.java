@@ -12,4 +12,6 @@ interface CloudObjectStore {
     void download(String remotePath, Path localDest) throws IOException, InterruptedException;
     void upload(Path localFile, String remotePath) throws IOException, InterruptedException;
     void delete(String remotePath) throws IOException, InterruptedException;
+    /** Copy every {@code <root>/*-smss/*.smss} into localDir in one parallel transfer. */
+    void downloadProjectSmss(String root, Path localDir) throws IOException, InterruptedException;
 }

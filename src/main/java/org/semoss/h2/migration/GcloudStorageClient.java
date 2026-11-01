@@ -29,6 +29,7 @@ public final class GcloudStorageClient implements CloudObjectStore {
 
     private static final Logger LOGGER = LogManager.getLogger(GcloudStorageClient.class);
     private static final Duration TIMEOUT = Duration.ofMinutes(10);
+    private static final Duration BULK_TIMEOUT = Duration.ofMinutes(60);
     private static final int MAX_ERROR_LENGTH = 4096;
 
     record ProcessResult(int exitCode, String stdout, String stderr) {}
@@ -213,12 +214,31 @@ public final class GcloudStorageClient implements CloudObjectStore {
         ensureSuccess(result, "gcloud storage rm");
     }
 
+    // gcloud flattens wildcard copies; callers read the project id from the file
+    @Override
+    public void downloadProjectSmss(String root, Path localDir)
+            throws IOException, InterruptedException {
+        RemotePath remote = parseRemotePath(root);
+        String pattern = remote.objectName().isBlank() ? "*-smss/*.smss" : remote.objectName() + "/*-smss/*.smss";
+        Path destination = localDir.toAbsolutePath().normalize();
+        Files.createDirectories(destination);
+        ProcessResult result = execute(command("storage", "cp",
+                new RemotePath(remote.bucket(), pattern).url(), destination + "/"), BULK_TIMEOUT);
+        if (result.exitCode() != 0 && isNoMatch(result.stderr())) return;
+        ensureSuccess(result, "gcloud storage cp project smss");
+    }
+
     private ProcessResult execute(List<String> command)
+            throws IOException, InterruptedException {
+        return execute(command, TIMEOUT);
+    }
+
+    private ProcessResult execute(List<String> command, Duration timeout)
             throws IOException, InterruptedException {
         LOGGER.debug("Executing gcloud storage operation");
         ProcessResult raw;
         try {
-            raw = executor.execute(command, environment, TIMEOUT);
+            raw = executor.execute(command, environment, timeout);
         } catch (IOException e) {
             throw new IOException(sanitize(e.getMessage()));
         }

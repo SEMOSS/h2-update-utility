@@ -23,6 +23,12 @@ One Job runs every scope in order (`semoss-db`, then `semoss-project`) through
   (Azure: `semoss-h2-migration` container).
 - Azure: set `SCOPES` to every `db-<engineId>` and `project-<projectId>`
   container; the utility handles one container per invocation.
+- `SKIP_WORKSPACE_PROJECTS=true` leaves the root `insights_database.mv.db` of
+  every project whose `.smss` says `PROJECT_ENUM_TYPE=WORKSPACE` untouched and
+  reports it `SKIPPED`; other H2 files in those projects still migrate. Use it
+  only with a SEMOSS build that recreates a workspace insights database it
+  cannot open. Project `.smss` files are fetched in one parallel copy (rclone:
+  ~17 s for 7.8k projects; gcloud is much slower, ~8 min).
 - Size `/work` (`emptyDir` `sizeLimit` and ephemeral-storage, or the PVC) for about 3x the largest single engine/project scope; each scope's
   local files are deleted once it finishes (a failed scope keeps its local backups).
 
