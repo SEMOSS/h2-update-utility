@@ -168,7 +168,7 @@ public final class RCloneClient implements CloudObjectStore {
 
     public List<String> listFiles(String remotePath, String include)
             throws IOException, InterruptedException {
-        RemoteSpec remote = remote(remotePath);
+        RemoteSpec remote = remote(remotePath, true);
         List<String> command = command("lsf", remote.argument());
         command.add("--recursive");
         command.add("--files-only");
@@ -226,7 +226,7 @@ public final class RCloneClient implements CloudObjectStore {
 
     public void downloadProjectSmss(String root, Path localDir)
             throws IOException, InterruptedException {
-        RemoteSpec remote = remote(root);
+        RemoteSpec remote = remote(root, true);
         List<String> command = command("copy", remote.argument(),
                 localDir.toAbsolutePath().normalize().toString(),
                 // Azure root is the account: only project SMSS containers, never engine (credential) ones
@@ -262,7 +262,14 @@ public final class RCloneClient implements CloudObjectStore {
     }
 
     private RemoteSpec remote(String path) {
-        String normalized = normalizeRemotePath(path);
+        return remote(path, false);
+    }
+
+    // accountRoot: an Azure listing or bulk copy may start at the account (every container)
+    private RemoteSpec remote(String path, boolean accountRoot) {
+        boolean root = accountRoot && provider == CloudStorageLayout.Provider.AZURE
+                && (path == null || path.isBlank());
+        String normalized = root ? "" : normalizeRemotePath(path);
         if (provider == CloudStorageLayout.Provider.LOCAL) {
             return new RemoteSpec(normalized, Map.of(), List.of());
         }

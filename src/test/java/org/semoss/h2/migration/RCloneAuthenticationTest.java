@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -43,6 +44,25 @@ class RCloneAuthenticationTest {
         assertEquals("AWS_DEFAULT_CHAIN", client.authenticationMode());
         assertEquals("true", executor.environment.get("RCLONE_CONFIG_SEMOSSH2_ENV_AUTH"));
         assertTrue(executor.command.stream().noneMatch(arg -> arg.contains("access-key")));
+    }
+
+    @Test
+    void azureAccountRootIsOnlyAllowedForListingAndBulkSmssCopy() throws Exception {
+        CapturingExecutor executor = new CapturingExecutor();
+        RCloneClient client = RCloneClient.fromConfig(config("azure", "--az-conn-string=conn"), executor);
+
+        client.listFiles("", "/db-*/**.mv.db");
+        assertEquals("semossh2:", executor.command.get(2));
+        assertTrue(executor.command.contains("--include=/db-*/**.mv.db"));
+
+        client.downloadProjectSmss("", Path.of("/tmp/smss"));
+        assertEquals("semossh2:", executor.command.get(2));
+        assertTrue(executor.command.contains("--include=/project-*-smss/*.smss"));
+
+        assertThrows(IllegalArgumentException.class, () -> client.stat(""));
+        assertThrows(IllegalArgumentException.class, () -> client.delete(""));
+        assertThrows(IllegalArgumentException.class,
+                () -> RCloneClient.fromConfig(config("s3"), executor).listFiles("", "*.mv.db"));
     }
 
     @Test
